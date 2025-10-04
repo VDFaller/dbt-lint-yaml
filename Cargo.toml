@@ -6,13 +6,13 @@ authors = ["Vince Faller <vdfaller@gmail.com>"]
 description = "A linter for dbt YAML files"
 
 [dependencies]
-dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
-dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
-dbt-common = { package = "dbt-common", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
-dbt-jinja-utils = { package = "dbt-jinja-utils", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
-dbt-loader = { package = "dbt-loader", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
-dbt-parser = { package = "dbt-parser", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
-dbt-sa-cli = { package = "dbt-sa-cli", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
+dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
+dbt-common = { package = "dbt-common", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
+dbt-jinja-utils = { package = "dbt-jinja-utils", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
+dbt-loader = { package = "dbt-loader", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
+dbt-parser = { package = "dbt-parser", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
+dbt-sa-cli = { package = "dbt-sa-cli", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
 dbt-serde_yaml = { git = "https://github.com/sdf-labs/dbt-serde-yaml", rev = "9ccae3e49f77fcd0a92230a1e41c51d74279409f", features = [
   "filename",
   "schemars",
