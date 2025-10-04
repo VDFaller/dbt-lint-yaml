@@ -1,0 +1,36 @@
+[package]
+name = "dbt-lint-yaml"
+version = "0.1.0"
+edition = "2024"
+authors = ["Vince Faller <vdfaller@gmail.com>"]
+description = "A linter for dbt YAML files"
+
+[dependencies]
+dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-common = { package = "dbt-common", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-jinja-utils = { package = "dbt-jinja-utils", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-loader = { package = "dbt-loader", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-parser = { package = "dbt-parser", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-sa-cli = { package = "dbt-sa-cli", git = "https://github.com/dbt-labs/dbt-fusion", branch = "main" }
+dbt-serde_yaml = { git = "https://github.com/sdf-labs/dbt-serde-yaml", rev = "9ccae3e49f77fcd0a92230a1e41c51d74279409f", features = [
+  "filename",
+  "schemars",
+  "flatten_dunder",
+] }
+tokio = { version = "1.41.1", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "process",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
+
+serde_json = "1.0.133"
+clap = { version = "4.4.4", features = ["derive"] }
+serde = { version = "1.0.147", default-features = false, features = ["derive"] }
+
