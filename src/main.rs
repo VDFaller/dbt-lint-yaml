@@ -83,10 +83,21 @@ async fn main() -> FsResult<()> {
 
     println!("Sources without description: {}", failures.sources.len());
 
-    println!(
-        "Models with inherited column changes recorded: {}",
-        check_result.model_changes.len()
-    );
+    for (model, model_changes) in check_result.model_changes.iter() {
+        println!("Model: {} has found changes", model);
+        for (column, column_changes) in model_changes.column_changes.iter() {
+            for change in column_changes {
+                println!(
+                    "  Column: {} - New Description: {}",
+                    column,
+                    change
+                        .new_description
+                        .as_deref()
+                        .unwrap_or("None"),
+                );
+            }
+        }
+    }
 
     Ok(())
 }
