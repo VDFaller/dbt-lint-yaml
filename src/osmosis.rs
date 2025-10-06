@@ -201,40 +201,32 @@ mod tests {
     }
 
     fn manifest_fixture() -> DbtManifestV12 {
-    // DAG overview for this fixture:
-    //
-    // source.jaffle_shop.customers ─▶ model.jaffle_shop.base_customers ─▶ model.jaffle_shop.customers ─▶ model.jaffle_shop.orders
-    //                                         ▲                                      ▲
-    //                                         │                                      │
-    // snapshot.jaffle_shop.customers_snapshot ┘                                      │
-    //                                                                                │
-    // seed.jaffle_shop.payments ─▶ model.jaffle_shop.payments ───────────────────────┘
+        // DAG overview for this fixture:
+        //
+        // source.jaffle_shop.customers ─▶ model.jaffle_shop.base_customers ─▶ model.jaffle_shop.customers ─▶ model.jaffle_shop.orders
+        //                                         ▲                                      ▲
+        //                                         │                                      │
+        // snapshot.jaffle_shop.customers_snapshot ┘                                      │
+        //                                                                                │
+        // seed.jaffle_shop.payments ─▶ model.jaffle_shop.payments ───────────────────────┘
         let mut manifest = DbtManifestV12::default();
 
-        manifest
-            .nodes
-            .insert(
-                "model.jaffle_shop.base_customers".to_string(),
-                DbtNode::Model(Default::default()),
-            );
-        manifest
-            .nodes
-            .insert(
-                "model.jaffle_shop.customers".to_string(),
-                DbtNode::Model(Default::default()),
-            );
-        manifest
-            .nodes
-            .insert(
-                "model.jaffle_shop.orders".to_string(),
-                DbtNode::Model(Default::default()),
-            );
-        manifest
-            .nodes
-            .insert(
-                "model.jaffle_shop.payments".to_string(),
-                DbtNode::Model(Default::default()),
-            );
+        manifest.nodes.insert(
+            "model.jaffle_shop.base_customers".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.jaffle_shop.customers".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.jaffle_shop.orders".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.jaffle_shop.payments".to_string(),
+            DbtNode::Model(Default::default()),
+        );
         manifest.nodes.insert(
             "seed.jaffle_shop.payments".to_string(),
             DbtNode::Seed(ManifestSeed {
@@ -245,19 +237,15 @@ mod tests {
                 __other__: Default::default(),
             }),
         );
-        manifest
-            .nodes
-            .insert(
-                "snapshot.jaffle_shop.customers_snapshot".to_string(),
-                DbtNode::Snapshot(Default::default()),
-            );
+        manifest.nodes.insert(
+            "snapshot.jaffle_shop.customers_snapshot".to_string(),
+            DbtNode::Snapshot(Default::default()),
+        );
 
-        manifest
-            .sources
-            .insert(
-                "source.jaffle_shop.customers".to_string(),
-                Default::default(),
-            );
+        manifest.sources.insert(
+            "source.jaffle_shop.customers".to_string(),
+            Default::default(),
+        );
 
         manifest
             .sources
@@ -317,7 +305,6 @@ mod tests {
             DbtNode::Model(model) => {
                 model.__base_attr__.depends_on.nodes = vec![
                     "model.jaffle_shop.base_customers".to_string(),
-                    "snapshot.jaffle_shop.customers_snapshot".to_string(),
                     "seed.jaffle_shop.payments".to_string(),
                 ];
                 model.__base_attr__.columns.insert(
@@ -375,12 +362,8 @@ mod tests {
     fn returns_description_from_upstream_model_column() {
         let manifest = manifest_fixture();
 
-        let result = get_upstream_col_desc(
-            &manifest,
-            None,
-            "model.jaffle_shop.orders",
-            "customer_id",
-        );
+        let result =
+            get_upstream_col_desc(&manifest, None, "model.jaffle_shop.orders", "customer_id");
 
         assert_eq!(result.as_deref(), Some("Customer id from manifest"));
     }
@@ -413,7 +396,7 @@ mod tests {
 
         assert!(result.is_none());
     }
-    
+
     // lookup_model_change_description tests
     #[test]
     fn returns_new_description_when_present() {

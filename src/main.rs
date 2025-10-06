@@ -46,7 +46,8 @@ async fn main() -> FsResult<()> {
 
     let mut dbt_manifest = build_manifest(&invocation_id, &resolved_state);
 
-    let failures = check_all(&mut dbt_manifest);
+    let check_result = check_all(&mut dbt_manifest);
+    let failures = &check_result.failures;
     // just realized, I don't need to have a mutable manifest, the manifest can't serialize anyway.
     // What I need is a model changeset that tracks what changed.
 
@@ -56,22 +57,35 @@ async fn main() -> FsResult<()> {
     //   The big problem with this is that serde_yaml doesn't preserve comments or formatting, so the output files would be very different from the input files.
     //   Could possibly do something cute with regex to just replace the description lines in the original files, but that seems fragile.
     //   The manifest isn't made to serialize to yaml directly anyway, so we need some transitional layer.
+    let models_without_description = failures
+        .models
+        .values()
+        .filter(|failure| failure.description_missing)
+        .count();
+    println!("Models without description: {}", models_without_description);
+
+    let models_without_tags = failures
+        .models
+        .values()
+        .filter(|failure| failure.tags_missing)
+        .count();
+    println!("Models without tags: {}", models_without_tags);
+
+    let models_with_column_failures = failures
+        .models
+        .values()
+        .filter(|failure| !failure.column_failures.is_empty())
+        .count();
     println!(
-        "Nodes without description: {:?}",
-        failures.model_failures.no_descriptions.len()
-    );
-    println!(
-        "Number of models without tags: {}",
-        failures.model_failures.no_tags.len()
-    );
-    println!(
-        "Models with columns missing descriptions: {:?}",
-        failures.model_failures.column_failures.len()
+        "Models with columns missing descriptions: {}",
+        models_with_column_failures
     );
 
+    println!("Sources without description: {}", failures.sources.len());
+
     println!(
-        "Sources without description: {:?}",
-        failures.source_failures.no_descriptions.len()
+        "Models with inherited column changes recorded: {}",
+        check_result.model_changes.len()
     );
 
     Ok(())
