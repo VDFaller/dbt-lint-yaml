@@ -44,9 +44,9 @@ async fn main() -> FsResult<()> {
     )
     .await?;
 
-    let mut dbt_manifest = build_manifest(&invocation_id, &resolved_state);
+    let dbt_manifest = build_manifest(&invocation_id, &resolved_state);
 
-    let check_result = check_all(&mut dbt_manifest);
+    let check_result = check_all(&dbt_manifest);
     let failures = &check_result.failures;
     // just realized, I don't need to have a mutable manifest, the manifest can't serialize anyway.
     // What I need is a model changeset that tracks what changed.
@@ -90,10 +90,7 @@ async fn main() -> FsResult<()> {
                 println!(
                     "  Column: {} - New Description: {}",
                     column,
-                    change
-                        .new_description
-                        .as_deref()
-                        .unwrap_or("None"),
+                    change.new_description.as_deref().unwrap_or("None"),
                 );
             }
         }

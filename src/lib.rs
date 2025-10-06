@@ -1,4 +1,4 @@
-use crate::osmosis::inherit_column_descriptions;
+use crate::osmosis::get_upstream_col_desc;
 use dbt_dag::deps_mgmt::topological_sort;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestSource};
 use std::collections::{BTreeMap, BTreeSet};
@@ -79,13 +79,14 @@ fn models_in_dag_order(manifest: &DbtManifestV12) -> Vec<String> {
     topological_sort(&deps)
 }
 
-pub fn check_all(manifest: &mut DbtManifestV12) -> CheckResult {
+pub fn check_all(manifest: &DbtManifestV12) -> CheckResult {
     let mut result = CheckResult::default();
     let sorted_nodes = models_in_dag_order(manifest);
     println!("Model processing order: {:?}", sorted_nodes);
 
     for model_id in sorted_nodes {
-        let (model_failure, model_changes) = check_model(manifest, &model_id);
+        let (model_failure, model_changes) =
+            check_model(manifest, &model_id, &result.model_changes);
 
         if let Some(failure) = model_failure {
             result
@@ -114,8 +115,9 @@ pub fn check_all(manifest: &mut DbtManifestV12) -> CheckResult {
 }
 
 fn check_model(
-    manifest: &mut DbtManifestV12,
+    manifest: &DbtManifestV12,
     model_id: &str,
+    prior_changes: &BTreeMap<String, ModelChanges>,
 ) -> (Option<ModelFailure>, Option<ModelChanges>) {
     let Some(DbtNode::Model(model_meta)) = manifest.nodes.get(model_id) else {
         return (None, None);
@@ -129,7 +131,7 @@ fn check_model(
     let ColumnCheckResult {
         failures: column_failures,
         column_changes,
-    } = check_model_columns(manifest, model_id);
+    } = check_model_columns(manifest, model_id, prior_changes);
 
     let has_column_failures = !column_failures.is_empty();
 
@@ -153,7 +155,11 @@ fn check_model(
     (model_failure, model_changes)
 }
 
-fn check_model_columns(manifest: &mut DbtManifestV12, model_id: &str) -> ColumnCheckResult {
+fn check_model_columns(
+    manifest: &DbtManifestV12,
+    model_id: &str,
+    prior_changes: &BTreeMap<String, ModelChanges>,
+) -> ColumnCheckResult {
     let mut result = ColumnCheckResult::default();
 
     let (missing_columns, previous_descriptions) = {
@@ -187,52 +193,32 @@ fn check_model_columns(manifest: &mut DbtManifestV12, model_id: &str) -> ColumnC
     };
 
     for col_name in &missing_columns {
-        let _ = inherit_column_descriptions(manifest, model_id, col_name);
-    }
+        match get_upstream_col_desc(manifest, Some(prior_changes), model_id, col_name) {
+            Some(desc) => {
+                let old_description = previous_descriptions.get(col_name).cloned().unwrap_or(None);
+                let new_description = Some(desc);
 
-    let Some(DbtNode::Model(updated_model)) = manifest.nodes.get(model_id) else {
-        return result;
-    };
-
-    let unresolved: Vec<String> = missing_columns
-        .iter()
-        .filter_map(|col_name| {
-            updated_model
-                .__base_attr__
-                .columns
-                .get(col_name)
-                .and_then(|col| col.description.is_none().then(|| col.name.clone()))
-        })
-        .collect();
-
-    for col_name in unresolved {
-        result.failures.insert(
-            col_name.clone(),
-            ColumnFailure {
-                column_name: col_name,
-                description_missing: true,
-            },
-        );
-    }
-
-    for col_name in &missing_columns {
-        let old_description = previous_descriptions.get(col_name).cloned().unwrap_or(None);
-        let new_description = updated_model
-            .__base_attr__
-            .columns
-            .get(col_name)
-            .and_then(|col| col.description.clone());
-
-        if old_description != new_description {
-            result
-                .column_changes
-                .entry(col_name.clone())
-                .or_default()
-                .insert(ColumnChanges {
-                    column_name: col_name.clone(),
-                    old_description,
-                    new_description,
-                });
+                if old_description != new_description {
+                    result
+                        .column_changes
+                        .entry(col_name.clone())
+                        .or_default()
+                        .insert(ColumnChanges {
+                            column_name: col_name.clone(),
+                            old_description,
+                            new_description,
+                        });
+                }
+            }
+            None => {
+                result.failures.insert(
+                    col_name.clone(),
+                    ColumnFailure {
+                        column_name: col_name.clone(),
+                        description_missing: true,
+                    },
+                );
+            }
         }
     }
 
@@ -298,9 +284,11 @@ mod tests {
 
     #[test]
     fn check_model_returns_column_changes() {
-        let mut manifest = manifest_with_inheritable_column();
+        let manifest = manifest_with_inheritable_column();
+        let prior_changes = std::collections::BTreeMap::<String, ModelChanges>::new();
 
-        let (model_failure, model_changes) = check_model(&mut manifest, "model.test.downstream");
+        let (model_failure, model_changes) =
+            check_model(&manifest, "model.test.downstream", &prior_changes);
 
         let failure = model_failure.expect("expected model failure to be recorded");
         assert!(failure.column_failures.is_empty());
@@ -320,9 +308,9 @@ mod tests {
 
     #[test]
     fn check_all_collects_model_changes() {
-        let mut manifest = manifest_with_inheritable_column();
+        let manifest = manifest_with_inheritable_column();
 
-        let result = check_all(&mut manifest);
+        let result = check_all(&manifest);
 
         assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));
