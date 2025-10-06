@@ -3,6 +3,7 @@ use dbt_dag::deps_mgmt::topological_sort;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestSource};
 use std::collections::{BTreeMap, BTreeSet};
 pub mod osmosis;
+use std::path::PathBuf;
 
 #[derive(Default, Debug)]
 pub struct ModelFailures {
@@ -15,6 +16,19 @@ pub struct ModelFailures {
 pub struct ColumnFailures {
     pub model: String,
     pub no_descriptions: Vec<String>,
+}
+
+#[derive(Default, Debug)]
+pub struct ModelChanges {
+    pub model_id: String,
+    pub patch_path: Option<PathBuf>,
+    pub column_changes: BTreeMap<String, BTreeSet<ColumnChanges>>,
+}
+#[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ColumnChanges {
+    pub column_name: String,
+    pub old_description: Option<String>,
+    pub new_description: Option<String>,
 }
 
 #[derive(Default, Debug)]
