@@ -23,7 +23,7 @@ impl Display for ModelFailure {
             writeln!(f, " - Missing Tags")?;
         }
         for column_failure in self.column_failures.values() {
-            writeln!(f, "\n  {}", column_failure)?;
+            write!(f, "{}", column_failure)?;
         }
         Ok(())
     }
@@ -37,9 +37,9 @@ pub struct ColumnFailure {
 
 impl Display for ColumnFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "ColumnFailure: {}", self.column_name)?;
+        writeln!(f, "  ColumnFailure: {}", self.column_name)?;
         if self.description_missing {
-            writeln!(f, " - Missing Description")?;
+            writeln!(f, "  - Missing Description")?;
         }
         Ok(())
     }
@@ -223,6 +223,16 @@ fn check_model_columns(
     };
 
     for col_name in &missing_columns {
+        if !config.pull_column_desc_from_upstream {
+			result.failures.insert(
+				col_name.clone(),
+				ColumnFailure {
+					column_name: col_name.clone(),
+					description_missing: true,
+				},
+			);
+			continue;
+		}
         match get_upstream_col_desc(manifest, Some(prior_changes), model_id, col_name) {
             Some(desc) => {
                 let old_description = previous_descriptions.get(col_name).cloned().unwrap_or(None);

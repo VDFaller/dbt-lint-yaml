@@ -22,10 +22,6 @@ async fn main() -> FsResult<()> {
     let load_args = LoadArgs::from_eval_args(&eval_args);
     let project_dir = load_args.io.in_dir.clone();
     let config = Config::from_toml(&project_dir);
-    println!(
-        "Using config: select={:?}, pull_column_desc_from_upstream={}",
-        config.select, config.pull_column_desc_from_upstream
-    );
 
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
     let _cts = CancellationTokenSource::new();
