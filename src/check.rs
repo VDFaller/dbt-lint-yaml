@@ -17,10 +17,10 @@ impl Display for ModelFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "ModelFailure: {}", self.model_id)?;
         if self.description_missing {
-            writeln!(f, " - Missing Description")?;
+            writeln!(f, "  - Missing Description")?;
         }
         if self.tags_missing {
-            writeln!(f, " - Missing Tags")?;
+            writeln!(f, "  - Missing Tags")?;
         }
         for column_failure in self.column_failures.values() {
             write!(f, "{}", column_failure)?;
@@ -39,7 +39,7 @@ impl Display for ColumnFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "  ColumnFailure: {}", self.column_name)?;
         if self.description_missing {
-            writeln!(f, "  - Missing Description")?;
+            writeln!(f, "    - Missing Description")?;
         }
         Ok(())
     }
