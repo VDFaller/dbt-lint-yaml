@@ -1,5 +1,5 @@
 use clap::Parser;
-use dbt_lint_yaml::{check_all, writeback};
+use dbt_lint_yaml::{check_all, config::Config, writeback};
 
 use dbt_common::{FsResult, cancellation::CancellationTokenSource};
 use dbt_jinja_utils::invocation_args::InvocationArgs;
@@ -21,6 +21,12 @@ async fn main() -> FsResult<()> {
 
     let load_args = LoadArgs::from_eval_args(&eval_args);
     let project_dir = load_args.io.in_dir.clone();
+    let config = Config::from_toml(&project_dir);
+    println!(
+        "Using config: select={:?}, pull_column_desc_from_upstream={}",
+        config.select, config.pull_column_desc_from_upstream
+    );
+
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
     let _cts = CancellationTokenSource::new();
     let token = _cts.token();
@@ -47,7 +53,7 @@ async fn main() -> FsResult<()> {
 
     let dbt_manifest = build_manifest(&invocation_id, &resolved_state);
 
-    let check_result = check_all(&dbt_manifest);
+    let check_result = check_all(&dbt_manifest, &config);
     let failures = &check_result.failures;
     // just realized, I don't need to have a mutable manifest, the manifest can't serialize anyway.
     // What I need is a model changeset that tracks what changed.
@@ -58,29 +64,9 @@ async fn main() -> FsResult<()> {
     //   The big problem with this is that serde_yaml doesn't preserve comments or formatting, so the output files would be very different from the input files.
     //   Could possibly do something cute with regex to just replace the description lines in the original files, but that seems fragile.
     //   The manifest isn't made to serialize to yaml directly anyway, so we need some transitional layer.
-    let models_without_description = failures
-        .models
-        .values()
-        .filter(|failure| failure.description_missing)
-        .count();
-    println!("Models without description: {}", models_without_description);
-
-    let models_without_tags = failures
-        .models
-        .values()
-        .filter(|failure| failure.tags_missing)
-        .count();
-    println!("Models without tags: {}", models_without_tags);
-
-    let models_with_column_failures = failures
-        .models
-        .values()
-        .filter(|failure| !failure.column_failures.is_empty())
-        .count();
-    println!(
-        "Models with columns missing descriptions: {}",
-        models_with_column_failures
-    );
+    for failure in failures.models.values() {
+        println!("{}", failure);
+    }
 
     println!("Sources without description: {}", failures.sources.len());
 

@@ -1,7 +1,8 @@
-use crate::osmosis::get_upstream_col_desc;
+use crate::{config::Config, osmosis::get_upstream_col_desc};
 use dbt_dag::deps_mgmt::topological_sort;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestSource};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Display;
 use std::path::PathBuf;
 
 #[derive(Default, Debug)]
@@ -12,10 +13,36 @@ pub struct ModelFailure {
     pub column_failures: BTreeMap<String, ColumnFailure>,
 }
 
+impl Display for ModelFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ModelFailure: {}", self.model_id)?;
+        if self.description_missing {
+            writeln!(f, " - Missing Description")?;
+        }
+        if self.tags_missing {
+            writeln!(f, " - Missing Tags")?;
+        }
+        for column_failure in self.column_failures.values() {
+            writeln!(f, "\n  {}", column_failure)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct ColumnFailure {
     pub column_name: String,
     pub description_missing: bool,
+}
+
+impl Display for ColumnFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "ColumnFailure: {}", self.column_name)?;
+        if self.description_missing {
+            writeln!(f, " - Missing Description")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default, Debug)]
@@ -78,14 +105,13 @@ fn models_in_dag_order(manifest: &DbtManifestV12) -> Vec<String> {
     topological_sort(&deps)
 }
 
-pub fn check_all(manifest: &DbtManifestV12) -> CheckResult {
+pub fn check_all(manifest: &DbtManifestV12, config: &Config) -> CheckResult {
     let mut result = CheckResult::default();
     let sorted_nodes = models_in_dag_order(manifest);
-    println!("Model processing order: {:?}", sorted_nodes);
 
     for model_id in sorted_nodes {
         let (model_failure, model_changes) =
-            check_model(manifest, &model_id, &result.model_changes);
+            check_model(manifest, &model_id, &result.model_changes, &config);
 
         if let Some(failure) = model_failure {
             result
@@ -117,6 +143,7 @@ fn check_model(
     manifest: &DbtManifestV12,
     model_id: &str,
     prior_changes: &BTreeMap<String, ModelChanges>,
+    config: &Config,
 ) -> (Option<ModelFailure>, Option<ModelChanges>) {
     let Some(DbtNode::Model(model_meta)) = manifest.nodes.get(model_id) else {
         return (None, None);
@@ -124,13 +151,13 @@ fn check_model(
 
     let unique_id = model_meta.__common_attr__.unique_id.clone();
     let patch_path = model_meta.__common_attr__.patch_path.clone();
-    let description_missing = model_meta.__common_attr__.description.is_none();
-    let tags_missing = model_meta.config.tags.is_none();
+    let description_missing = config.select.contains(&"missing_model_description".to_string()) && model_meta.__common_attr__.description.is_none();
+    let tags_missing = config.select.contains(&"missing_model_tags".to_string()) && model_meta.config.tags.is_none();
 
     let ColumnCheckResult {
         failures: column_failures,
         column_changes,
-    } = check_model_columns(manifest, model_id, prior_changes);
+    } = check_model_columns(manifest, model_id, prior_changes, &config);
 
     let has_column_failures = !column_failures.is_empty();
 
@@ -158,8 +185,12 @@ fn check_model_columns(
     manifest: &DbtManifestV12,
     model_id: &str,
     prior_changes: &BTreeMap<String, ModelChanges>,
+	config: &Config,
 ) -> ColumnCheckResult {
     let mut result = ColumnCheckResult::default();
+	if !config.select.contains(&"missing_column_descriptions".to_string()) {
+		return result;
+	}
 
     let (missing_columns, previous_descriptions) = {
         let Some(DbtNode::Model(model)) = manifest.nodes.get(model_id) else {
@@ -286,8 +317,12 @@ mod tests {
         let manifest = manifest_with_inheritable_column();
         let prior_changes = std::collections::BTreeMap::<String, ModelChanges>::new();
 
-        let (model_failure, model_changes) =
-            check_model(&manifest, "model.test.downstream", &prior_changes);
+        let (model_failure, model_changes) = check_model(
+            &manifest,
+            "model.test.downstream",
+            &prior_changes,
+            &Config::default(),
+        );
 
         let failure = model_failure.expect("expected model failure to be recorded");
         assert!(failure.column_failures.is_empty());
@@ -309,7 +344,7 @@ mod tests {
     fn check_all_collects_model_changes() {
         let manifest = manifest_with_inheritable_column();
 
-        let result = check_all(&manifest);
+        let result = check_all(&manifest, &Config::default());
 
         assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));
