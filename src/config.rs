@@ -1,9 +1,36 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Selector {
+    MissingColumnDescriptions,
+    MissingModelDescriptions,
+    MissingModelTags,
+    MissingSourceDescriptions,
+}
+
+impl Selector {
+    pub const ALL: [Self; 4] = [
+        Selector::MissingColumnDescriptions,
+        Selector::MissingModelDescriptions,
+        Selector::MissingModelTags,
+        Selector::MissingSourceDescriptions,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Selector::MissingColumnDescriptions => "missing_column_descriptions",
+            Selector::MissingModelDescriptions => "missing_model_descriptions",
+            Selector::MissingModelTags => "missing_model_tags",
+            Selector::MissingSourceDescriptions => "missing_source_descriptions",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Config {
     #[serde(default = "default_select")]
-    pub select: Vec<String>,
+    pub select: Vec<Selector>,
     #[serde(default = "default_pull_column_desc_from_upstream")]
     pub pull_column_desc_from_upstream: bool,
 }
@@ -34,13 +61,8 @@ impl Config {
     }
 }
 
-fn default_select() -> Vec<String> {
-    vec![
-        "missing_column_descriptions".to_string(),
-        "missing_model_descriptions".to_string(),
-        "missing_model_tags".to_string(),
-        "missing_source_descriptions".to_string(),
-    ]
+fn default_select() -> Vec<Selector> {
+    Selector::ALL.to_vec()
 }
 
 fn default_pull_column_desc_from_upstream() -> bool {
@@ -71,10 +93,23 @@ mod tests {
         assert_eq!(
             config.select,
             vec![
-                "missing_column_descriptions".to_string(),
-                "missing_model_tags".to_string()
+                Selector::MissingColumnDescriptions,
+                Selector::MissingModelTags
             ]
         );
         assert_eq!(config.pull_column_desc_from_upstream, false);
+    }
+
+    #[test]
+    fn test_from_str_rejects_unknown_selector() {
+        let toml_str = r#"
+            select = ["missing_model_description"]
+        "#;
+        let err = toml::from_str::<Config>(toml_str).expect_err("invalid selector should error");
+        let message = err.to_string();
+        for variant in Selector::ALL {
+            let expected = variant.as_str();
+            assert!(message.contains(expected), "error should mention {expected}, got: {message}");
+        }
     }
 }

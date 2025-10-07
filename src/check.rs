@@ -1,4 +1,4 @@
-use crate::{config::Config, osmosis::get_upstream_col_desc};
+use crate::{config::{Config, Selector}, osmosis::get_upstream_col_desc};
 use dbt_dag::deps_mgmt::topological_sort;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestSource};
 use std::collections::{BTreeMap, BTreeSet};
@@ -153,9 +153,11 @@ fn check_model(
     let patch_path = model_meta.__common_attr__.patch_path.clone();
     let description_missing = config
         .select
-        .contains(&"missing_model_descriptions".to_string())
+        .contains(&Selector::MissingModelDescriptions)
         && model_meta.__common_attr__.description.is_none();
-    let tags_missing = config.select.contains(&"missing_model_tags".to_string())
+    let tags_missing = config
+        .select
+        .contains(&Selector::MissingModelTags)
         && model_meta.config.tags.is_none();
 
     let ColumnCheckResult {
@@ -194,7 +196,7 @@ fn check_model_columns(
     let mut result = ColumnCheckResult::default();
     if !config
         .select
-        .contains(&"missing_column_descriptions".to_string())
+        .contains(&Selector::MissingColumnDescriptions)
     {
         return result;
     }
