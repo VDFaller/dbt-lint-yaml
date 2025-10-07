@@ -1,5 +1,5 @@
 use clap::Parser;
-use dbt_lint_yaml::check_all;
+use dbt_lint_yaml::{check_all, writeback};
 
 use dbt_common::{FsResult, cancellation::CancellationTokenSource};
 use dbt_jinja_utils::invocation_args::InvocationArgs;
@@ -20,6 +20,7 @@ async fn main() -> FsResult<()> {
     let invocation_id = eval_args.io.invocation_id.to_string();
 
     let load_args = LoadArgs::from_eval_args(&eval_args);
+    let project_dir = load_args.io.in_dir.clone();
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
     let _cts = CancellationTokenSource::new();
     let token = _cts.token();
@@ -92,6 +93,24 @@ async fn main() -> FsResult<()> {
                     column,
                     change.new_description.as_deref().unwrap_or("None"),
                 );
+            }
+        }
+    }
+
+    if let Some(model_changes) =
+        (!check_result.model_changes.is_empty()).then(|| &check_result.model_changes)
+    {
+        match writeback::apply_model_changes_with_ruamel(project_dir.as_path(), model_changes) {
+            Ok(applied) => {
+                for (model_id, columns) in applied {
+                    if columns.is_empty() {
+                        continue;
+                    }
+                    println!("Applied ruamel.yaml updates for {model_id}: {columns:?}");
+                }
+            }
+            Err(err) => {
+                eprintln!("Failed to apply YAML updates: {err}");
             }
         }
     }

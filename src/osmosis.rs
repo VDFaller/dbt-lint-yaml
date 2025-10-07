@@ -71,7 +71,7 @@ fn lookup_model_change_description(
 #[cfg(test)]
 mod tests {
     use super::{get_upstream_col_desc, lookup_model_change_description};
-    use crate::{ColumnChanges, ModelChanges};
+    use crate::check::{ColumnChanges, ModelChanges};
     use dbt_schemas::schemas::{
         dbt_column::DbtColumn,
         manifest::{DbtManifestV12, DbtNode, ManifestSeed},

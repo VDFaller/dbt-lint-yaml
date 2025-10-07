@@ -12,3 +12,13 @@ Something like:
 dbt-lint-yaml check --fix
 ```
 
+## Requirements
+
+In addition to Rust, the current write-back flow shells out to a Python helper that
+uses [`ruamel.yaml`](https://pypi.org/project/ruamel.yaml/) to preserve formatting.
+Make sure Python 3 is available on your `$PATH` and install the dependency with:
+
+```bash
+pip install ruamel.yaml
+```
+
