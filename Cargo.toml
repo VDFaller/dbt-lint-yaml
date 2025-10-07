@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Vince Faller <vdfaller@gmail.com>"]
 description = "A linter for dbt YAML files"
+default-run = "dbt-lint-yaml"
 
 [dependencies]
 dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }

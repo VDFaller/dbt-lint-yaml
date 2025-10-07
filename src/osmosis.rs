@@ -1,4 +1,4 @@
-use crate::ModelChanges;
+use crate::check::ModelChanges;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::BTreeMap;
 
