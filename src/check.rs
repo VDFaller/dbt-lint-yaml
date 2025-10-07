@@ -151,8 +151,12 @@ fn check_model(
 
     let unique_id = model_meta.__common_attr__.unique_id.clone();
     let patch_path = model_meta.__common_attr__.patch_path.clone();
-    let description_missing = config.select.contains(&"missing_model_description".to_string()) && model_meta.__common_attr__.description.is_none();
-    let tags_missing = config.select.contains(&"missing_model_tags".to_string()) && model_meta.config.tags.is_none();
+    let description_missing = config
+        .select
+        .contains(&"missing_model_descriptions".to_string())
+        && model_meta.__common_attr__.description.is_none();
+    let tags_missing = config.select.contains(&"missing_model_tags".to_string())
+        && model_meta.config.tags.is_none();
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -185,12 +189,15 @@ fn check_model_columns(
     manifest: &DbtManifestV12,
     model_id: &str,
     prior_changes: &BTreeMap<String, ModelChanges>,
-	config: &Config,
+    config: &Config,
 ) -> ColumnCheckResult {
     let mut result = ColumnCheckResult::default();
-	if !config.select.contains(&"missing_column_descriptions".to_string()) {
-		return result;
-	}
+    if !config
+        .select
+        .contains(&"missing_column_descriptions".to_string())
+    {
+        return result;
+    }
 
     let (missing_columns, previous_descriptions) = {
         let Some(DbtNode::Model(model)) = manifest.nodes.get(model_id) else {
@@ -224,15 +231,15 @@ fn check_model_columns(
 
     for col_name in &missing_columns {
         if !config.pull_column_desc_from_upstream {
-			result.failures.insert(
-				col_name.clone(),
-				ColumnFailure {
-					column_name: col_name.clone(),
-					description_missing: true,
-				},
-			);
-			continue;
-		}
+            result.failures.insert(
+                col_name.clone(),
+                ColumnFailure {
+                    column_name: col_name.clone(),
+                    description_missing: true,
+                },
+            );
+            continue;
+        }
         match get_upstream_col_desc(manifest, Some(prior_changes), model_id, col_name) {
             Some(desc) => {
                 let old_description = previous_descriptions.get(col_name).cloned().unwrap_or(None);
