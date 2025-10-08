@@ -73,6 +73,7 @@ pub struct ColumnChanges {
 pub struct SourceFailure {
     pub source_id: String,
     pub description_missing: bool,
+    pub duplicate_id: Option<String>,
 }
 
 impl Display for SourceFailure {
@@ -80,6 +81,9 @@ impl Display for SourceFailure {
         writeln!(f, "SourceFailure: {}", self.source_id)?;
         if self.description_missing {
             writeln!(f, "  - Missing Description")?;
+        }
+        if let Some(duplicate_id) = &self.duplicate_id {
+            writeln!(f, "  - Duplicate Source Definition: {}", duplicate_id)?;
         }
         Ok(())
     }
@@ -152,7 +156,7 @@ pub fn check_all(manifest: &DbtManifestV12, config: &Config) -> CheckResult {
 
     for model_id in sorted_nodes {
         let (model_failure, model_changes) =
-            check_model(manifest, &model_id, &result.model_changes, &config);
+            check_model(manifest, &model_id, &result.model_changes, config);
 
         if let Some(failure) = model_failure {
             result
@@ -169,7 +173,7 @@ pub fn check_all(manifest: &DbtManifestV12, config: &Config) -> CheckResult {
     }
 
     for source in manifest.sources.values() {
-        if let Some(source_failure) = check_source(source) {
+        if let Some(source_failure) = check_source(manifest, source, config) {
             result
                 .failures
                 .sources
@@ -339,13 +343,41 @@ fn check_model_columns(
     result
 }
 
-fn check_source(source: &ManifestSource) -> Option<SourceFailure> {
-    let description_missing = source.__common_attr__.description.is_none();
+fn check_source(
+    manifest: &DbtManifestV12,
+    source: &ManifestSource,
+    config: &Config,
+) -> Option<SourceFailure> {
+    let description_missing = config.select.contains(&Selector::MissingSourceDescriptions)
+        && source.__common_attr__.description.is_none();
+    let duplicate_id = config
+        .select
+        .contains(&Selector::DuplicateSources)
+        .then(|| duplicate_source(manifest, source))
+        .flatten();
 
-    description_missing.then(|| SourceFailure {
+    (description_missing || duplicate_id.is_some()).then(|| SourceFailure {
         source_id: source.__common_attr__.unique_id.clone(),
         description_missing,
+        duplicate_id,
     })
+}
+
+fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Option<String> {
+    if source.__common_attr__.name == source.identifier {
+        return None;
+    }
+    // TODO: look into performance of this search in a larger project
+    manifest
+        .sources
+        .values()
+        .find(|s| {
+            // there technically could be more than one dupe, but do I care?
+            s.identifier == source.identifier
+                && s.source_name == source.source_name
+                && s.__common_attr__.unique_id != source.__common_attr__.unique_id
+        })
+        .map(|s| s.__common_attr__.unique_id.clone())
 }
 
 #[cfg(test)]
