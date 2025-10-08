@@ -8,15 +8,17 @@ pub enum Selector {
     MissingModelTags,
     MissingSourceDescriptions,
     DirectJoinToSource,
+    MissingPropertiesFile,
 }
 
 impl Selector {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
         Selector::MissingSourceDescriptions,
         Selector::DirectJoinToSource,
+        Selector::MissingPropertiesFile,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -26,6 +28,7 @@ impl Selector {
             Selector::MissingModelTags => "missing_model_tags",
             Selector::MissingSourceDescriptions => "missing_source_descriptions",
             Selector::DirectJoinToSource => "direct_join_to_source",
+            Selector::MissingPropertiesFile => "missing_properties_file",
         }
     }
 }

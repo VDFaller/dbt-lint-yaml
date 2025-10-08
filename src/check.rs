@@ -14,7 +14,8 @@ pub struct ModelFailure {
     pub description_missing: bool,
     pub tags_missing: bool,
     pub column_failures: BTreeMap<String, ColumnFailure>,
-    pub direct_join_to_source: bool,
+    pub is_direct_join_to_source: bool,
+    pub is_missing_properties_file: bool,
 }
 
 impl Display for ModelFailure {
@@ -26,8 +27,11 @@ impl Display for ModelFailure {
         if self.tags_missing {
             writeln!(f, "  - Missing Tags")?;
         }
-        if self.direct_join_to_source {
+        if self.is_direct_join_to_source {
             writeln!(f, "  - Direct join to source detected")?;
+        }
+        if self.is_missing_properties_file {
+            writeln!(f, "  - Missing properties file")?;
         }
         for column_failure in self.column_failures.values() {
             write!(f, "{}", column_failure)?;
@@ -182,7 +186,7 @@ fn check_model(
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
 ) -> (Option<ModelFailure>, Option<ModelChanges>) {
-    let Some(DbtNode::Model(model_meta)) = manifest.nodes.get(model_id) else {
+    let Some(node @ DbtNode::Model(model_meta)) = manifest.nodes.get(model_id) else {
         return (None, None);
     };
 
@@ -193,7 +197,10 @@ fn check_model(
     let tags_missing =
         config.select.contains(&Selector::MissingModelTags) && model_meta.config.tags.is_none();
 
-    let direct_join_to_source = direct_join_to_source(model_meta);
+    let is_direct_join_to_source =
+        config.select.contains(&Selector::DirectJoinToSource) && direct_join_to_source(model_meta);
+    let is_missing_properties_file =
+        config.select.contains(&Selector::MissingPropertiesFile) && missing_properties_file(node);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -202,18 +209,23 @@ fn check_model(
 
     let has_column_failures = !column_failures.is_empty();
 
-    let model_failure =
-        if description_missing || tags_missing || has_column_failures || direct_join_to_source {
-            Some(ModelFailure {
-                model_id: unique_id.clone(),
-                description_missing,
-                tags_missing,
-                column_failures,
-                direct_join_to_source,
-            })
-        } else {
-            None
-        };
+    let model_failure = if description_missing
+        || tags_missing
+        || has_column_failures
+        || is_direct_join_to_source
+        || is_missing_properties_file
+    {
+        Some(ModelFailure {
+            model_id: unique_id.clone(),
+            description_missing,
+            tags_missing,
+            column_failures,
+            is_direct_join_to_source,
+            is_missing_properties_file,
+        })
+    } else {
+        None
+    };
 
     let model_changes = (!column_changes.is_empty()).then_some(ModelChanges {
         model_id: unique_id,
@@ -232,6 +244,15 @@ fn direct_join_to_source(model: &ManifestModel) -> bool {
     depends_on
         .iter()
         .any(|upstream_id| upstream_id.starts_with("source."))
+}
+
+fn missing_properties_file(node: &DbtNode) -> bool {
+    match node {
+        DbtNode::Model(model) => model.__common_attr__.patch_path.is_none(),
+        DbtNode::Seed(seed) => seed.__common_attr__.patch_path.is_none(),
+        DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.is_none(),
+        _ => false,
+    }
 }
 
 fn check_model_columns(
