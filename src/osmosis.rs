@@ -15,6 +15,7 @@ pub(crate) fn get_upstream_col_desc(
         return None;
     };
 
+    // check the changes first on the assumption that manifest will be much bigger than changes
     if let Some(changes) = model_changes {
         for upstream_id in &upstream_ids {
             if let Some(desc) = lookup_model_change_description(changes, upstream_id, col_name) {

@@ -82,10 +82,10 @@ async fn main() -> FsResult<()> {
         }
     }
 
-	if !check_result.failures.is_empty() {
-		println!("{}", check_result.failures);
-		std::process::exit(1);
-	}
+    if !check_result.failures.is_empty() {
+        println!("{}", check_result.failures);
+        std::process::exit(1);
+    }
 
     Ok(())
 }

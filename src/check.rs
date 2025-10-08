@@ -1,6 +1,9 @@
-use crate::{config::{Config, Selector}, osmosis::get_upstream_col_desc};
+use crate::{
+    config::{Config, Selector},
+    osmosis::get_upstream_col_desc,
+};
 use dbt_dag::deps_mgmt::topological_sort;
-use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestSource};
+use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel, ManifestSource};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -11,6 +14,7 @@ pub struct ModelFailure {
     pub description_missing: bool,
     pub tags_missing: bool,
     pub column_failures: BTreeMap<String, ColumnFailure>,
+    pub direct_join_to_source: bool,
 }
 
 impl Display for ModelFailure {
@@ -21,6 +25,9 @@ impl Display for ModelFailure {
         }
         if self.tags_missing {
             writeln!(f, "  - Missing Tags")?;
+        }
+        if self.direct_join_to_source {
+            writeln!(f, "  - Direct join to source detected")?;
         }
         for column_failure in self.column_failures.values() {
             write!(f, "{}", column_failure)?;
@@ -65,13 +72,13 @@ pub struct SourceFailure {
 }
 
 impl Display for SourceFailure {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		writeln!(f, "SourceFailure: {}", self.source_id)?;
-		if self.description_missing {
-			writeln!(f, "  - Missing Description")?;
-		}
-		Ok(())
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "SourceFailure: {}", self.source_id)?;
+        if self.description_missing {
+            writeln!(f, "  - Missing Description")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default, Debug)]
@@ -81,22 +88,22 @@ pub struct Failures {
 }
 
 impl Display for Failures {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		writeln!(f, "Failures:")?;
-		for model_failure in self.models.values() {
-			write!(f, "{}", model_failure)?;
-		}
-		for source_failure in self.sources.values() {
-			write!(f, "{}", source_failure)?;
-		}
-		Ok(())
-	}
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Failures:")?;
+        for model_failure in self.models.values() {
+            write!(f, "{}", model_failure)?;
+        }
+        for source_failure in self.sources.values() {
+            write!(f, "{}", source_failure)?;
+        }
+        Ok(())
+    }
 }
 
 impl Failures {
-	pub fn is_empty(&self) -> bool {
-		self.models.is_empty() && self.sources.is_empty()
-	}
+    pub fn is_empty(&self) -> bool {
+        self.models.is_empty() && self.sources.is_empty()
+    }
 }
 
 #[derive(Default, Debug)]
@@ -181,14 +188,12 @@ fn check_model(
 
     let unique_id = model_meta.__common_attr__.unique_id.clone();
     let patch_path = model_meta.__common_attr__.patch_path.clone();
-    let description_missing = config
-        .select
-        .contains(&Selector::MissingModelDescriptions)
+    let description_missing = config.select.contains(&Selector::MissingModelDescriptions)
         && model_meta.__common_attr__.description.is_none();
-    let tags_missing = config
-        .select
-        .contains(&Selector::MissingModelTags)
-        && model_meta.config.tags.is_none();
+    let tags_missing =
+        config.select.contains(&Selector::MissingModelTags) && model_meta.config.tags.is_none();
+
+    let direct_join_to_source = direct_join_to_source(model_meta);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -197,16 +202,18 @@ fn check_model(
 
     let has_column_failures = !column_failures.is_empty();
 
-    let model_failure = if description_missing || tags_missing || has_column_failures {
-        Some(ModelFailure {
-            model_id: unique_id.clone(),
-            description_missing,
-            tags_missing,
-            column_failures,
-        })
-    } else {
-        None
-    };
+    let model_failure =
+        if description_missing || tags_missing || has_column_failures || direct_join_to_source {
+            Some(ModelFailure {
+                model_id: unique_id.clone(),
+                description_missing,
+                tags_missing,
+                column_failures,
+                direct_join_to_source,
+            })
+        } else {
+            None
+        };
 
     let model_changes = (!column_changes.is_empty()).then_some(ModelChanges {
         model_id: unique_id,
@@ -217,6 +224,16 @@ fn check_model(
     (model_failure, model_changes)
 }
 
+fn direct_join_to_source(model: &ManifestModel) -> bool {
+    let depends_on = &model.__base_attr__.depends_on.nodes;
+    if depends_on.len() < 2 {
+        return false;
+    }
+    depends_on
+        .iter()
+        .any(|upstream_id| upstream_id.starts_with("source."))
+}
+
 fn check_model_columns(
     manifest: &DbtManifestV12,
     model_id: &str,
@@ -224,10 +241,7 @@ fn check_model_columns(
     config: &Config,
 ) -> ColumnCheckResult {
     let mut result = ColumnCheckResult::default();
-    if !config
-        .select
-        .contains(&Selector::MissingColumnDescriptions)
-    {
+    if !config.select.contains(&Selector::MissingColumnDescriptions) {
         return result;
     }
 
@@ -403,5 +417,38 @@ mod tests {
             .get("model.test.downstream")
             .expect("model failure should be tracked");
         assert!(failure.description_missing);
+    }
+
+    #[test]
+    fn test_direct_join_to_source() {
+        let mut model = ManifestModel::default();
+
+        model.__common_attr__.unique_id = "model.test.target".to_string();
+        model.__base_attr__.depends_on.nodes = vec![
+            "model.test.upstream".to_string(),
+            "source.test.raw_layer.orders".to_string(),
+        ];
+        assert!(direct_join_to_source(&model));
+    }
+
+    #[test]
+    fn test_direct_join_to_source_single_dependency() {
+        let mut model = ManifestModel::default();
+
+        model.__common_attr__.unique_id = "model.test.target".to_string();
+        model.__base_attr__.depends_on.nodes = vec!["source.test.raw_layer.orders".to_string()];
+        assert!(!direct_join_to_source(&model));
+    }
+
+    #[test]
+    fn test_direct_join_to_source_no_sources() {
+        let mut model = ManifestModel::default();
+
+        model.__common_attr__.unique_id = "model.test.target".to_string();
+        model.__base_attr__.depends_on.nodes = vec![
+            "model.test.upstream".to_string(),
+            "model.test.another_upstream".to_string(),
+        ];
+        assert!(!direct_join_to_source(&model));
     }
 }

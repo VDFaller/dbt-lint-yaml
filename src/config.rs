@@ -7,14 +7,16 @@ pub enum Selector {
     MissingModelDescriptions,
     MissingModelTags,
     MissingSourceDescriptions,
+    DirectJoinToSource,
 }
 
 impl Selector {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
         Selector::MissingSourceDescriptions,
+        Selector::DirectJoinToSource,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -23,6 +25,7 @@ impl Selector {
             Selector::MissingModelDescriptions => "missing_model_descriptions",
             Selector::MissingModelTags => "missing_model_tags",
             Selector::MissingSourceDescriptions => "missing_source_descriptions",
+            Selector::DirectJoinToSource => "direct_join_to_source",
         }
     }
 }
@@ -109,7 +112,10 @@ mod tests {
         let message = err.to_string();
         for variant in Selector::ALL {
             let expected = variant.as_str();
-            assert!(message.contains(expected), "error should mention {expected}, got: {message}");
+            assert!(
+                message.contains(expected),
+                "error should mention {expected}, got: {message}"
+            );
         }
     }
 }
