@@ -50,21 +50,6 @@ async fn main() -> FsResult<()> {
     let dbt_manifest = build_manifest(&invocation_id, &resolved_state);
 
     let check_result = check_all(&dbt_manifest, &config);
-    let failures = &check_result.failures;
-    // just realized, I don't need to have a mutable manifest, the manifest can't serialize anyway.
-    // What I need is a model changeset that tracks what changed.
-
-    // writing the yamls back to disk I figure will work like this
-    // Step 1: Go through manifest in DAG order and create some type of "These columns got changed from None to Some(description)"
-    // Step 2: Use the path information to read the yamls back in, update them, and write them back out
-    //   The big problem with this is that serde_yaml doesn't preserve comments or formatting, so the output files would be very different from the input files.
-    //   Could possibly do something cute with regex to just replace the description lines in the original files, but that seems fragile.
-    //   The manifest isn't made to serialize to yaml directly anyway, so we need some transitional layer.
-    for failure in failures.models.values() {
-        println!("{}", failure);
-    }
-
-    println!("Sources without description: {}", failures.sources.len());
 
     for (model, model_changes) in check_result.model_changes.iter() {
         println!("Model: {} has found changes", model);
@@ -96,6 +81,11 @@ async fn main() -> FsResult<()> {
             }
         }
     }
+
+	if !check_result.failures.is_empty() {
+		println!("{}", check_result.failures);
+		std::process::exit(1);
+	}
 
     Ok(())
 }

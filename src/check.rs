@@ -44,7 +44,7 @@ impl Display for ColumnFailure {
         Ok(())
     }
 }
-
+// TODO: Change ModelChanges to pull from an enum of possible changes
 #[derive(Default, Debug)]
 pub struct ModelChanges {
     pub model_id: String,
@@ -64,10 +64,39 @@ pub struct SourceFailure {
     pub description_missing: bool,
 }
 
+impl Display for SourceFailure {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		writeln!(f, "SourceFailure: {}", self.source_id)?;
+		if self.description_missing {
+			writeln!(f, "  - Missing Description")?;
+		}
+		Ok(())
+	}
+}
+
 #[derive(Default, Debug)]
 pub struct Failures {
     pub models: BTreeMap<String, ModelFailure>,
     pub sources: BTreeMap<String, SourceFailure>,
+}
+
+impl Display for Failures {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		writeln!(f, "Failures:")?;
+		for model_failure in self.models.values() {
+			write!(f, "{}", model_failure)?;
+		}
+		for source_failure in self.sources.values() {
+			write!(f, "{}", source_failure)?;
+		}
+		Ok(())
+	}
+}
+
+impl Failures {
+	pub fn is_empty(&self) -> bool {
+		self.models.is_empty() && self.sources.is_empty()
+	}
 }
 
 #[derive(Default, Debug)]
@@ -82,6 +111,7 @@ struct ColumnCheckResult {
     column_changes: BTreeMap<String, BTreeSet<ColumnChanges>>,
 }
 
+// TODO: This should just be the full DAG, not just models
 fn models_in_dag_order(manifest: &DbtManifestV12) -> Vec<String> {
     let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
