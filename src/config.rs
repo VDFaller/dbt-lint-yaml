@@ -10,10 +10,11 @@ pub enum Selector {
     DirectJoinToSource,
     MissingPropertiesFile,
     DuplicateSources,
+    ModelFanout,
 }
 
 impl Selector {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
@@ -21,6 +22,7 @@ impl Selector {
         Selector::DirectJoinToSource,
         Selector::MissingPropertiesFile,
         Selector::DuplicateSources,
+        Selector::ModelFanout,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -32,6 +34,7 @@ impl Selector {
             Selector::DirectJoinToSource => "direct_join_to_source",
             Selector::MissingPropertiesFile => "missing_properties_file",
             Selector::DuplicateSources => "duplicate_sources",
+            Selector::ModelFanout => "model_fanout",
         }
     }
 }
@@ -42,6 +45,8 @@ pub struct Config {
     pub select: Vec<Selector>,
     #[serde(default = "default_pull_column_desc_from_upstream")]
     pub pull_column_desc_from_upstream: bool,
+    #[serde(default = "default_model_fanout_threshold")]
+    pub model_fanout_threshold: usize,
 }
 
 impl Default for Config {
@@ -49,6 +54,7 @@ impl Default for Config {
         Self {
             select: default_select(),
             pull_column_desc_from_upstream: default_pull_column_desc_from_upstream(),
+            model_fanout_threshold: default_model_fanout_threshold(),
         }
     }
 }
@@ -76,6 +82,9 @@ fn default_select() -> Vec<Selector> {
 
 fn default_pull_column_desc_from_upstream() -> bool {
     true
+}
+fn default_model_fanout_threshold() -> usize {
+    3
 }
 
 #[cfg(test)]

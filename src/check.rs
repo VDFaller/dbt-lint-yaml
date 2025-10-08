@@ -16,6 +16,7 @@ pub struct ModelFailure {
     pub column_failures: BTreeMap<String, ColumnFailure>,
     pub is_direct_join_to_source: bool,
     pub is_missing_properties_file: bool,
+    pub is_model_fanout: bool,
 }
 
 impl Display for ModelFailure {
@@ -32,6 +33,9 @@ impl Display for ModelFailure {
         }
         if self.is_missing_properties_file {
             writeln!(f, "  - Missing properties file")?;
+        }
+        if self.is_model_fanout {
+            writeln!(f, "  - Model fanout exceeds threshold")?;
         }
         for column_failure in self.column_failures.values() {
             write!(f, "{}", column_failure)?;
@@ -205,6 +209,7 @@ fn check_model(
         config.select.contains(&Selector::DirectJoinToSource) && direct_join_to_source(model_meta);
     let is_missing_properties_file =
         config.select.contains(&Selector::MissingPropertiesFile) && missing_properties_file(node);
+    let is_model_fanout = model_fanout(manifest, model_id, config);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -218,6 +223,7 @@ fn check_model(
         || has_column_failures
         || is_direct_join_to_source
         || is_missing_properties_file
+        || is_model_fanout
     {
         Some(ModelFailure {
             model_id: unique_id.clone(),
@@ -226,6 +232,7 @@ fn check_model(
             column_failures,
             is_direct_join_to_source,
             is_missing_properties_file,
+            is_model_fanout,
         })
     } else {
         None
@@ -257,6 +264,21 @@ fn missing_properties_file(node: &DbtNode) -> bool {
         DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.is_none(),
         _ => false,
     }
+}
+
+fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> bool {
+    if !config.select.contains(&Selector::ModelFanout) {
+        return false;
+    }
+    let downstream_models = manifest
+        .child_map
+        .get(model_id)
+        .into_iter()
+        .flatten()
+        .filter(|id| id.starts_with("model."))
+        .count();
+
+    return downstream_models > config.model_fanout_threshold;
 }
 
 fn check_model_columns(
@@ -503,5 +525,45 @@ mod tests {
             "model.test.another_upstream".to_string(),
         ];
         assert!(!direct_join_to_source(&model));
+    }
+
+    #[test]
+    fn test_model_fanout() {
+        let mut manifest = DbtManifestV12::default();
+
+        manifest.child_map.insert(
+            "model.test.one_model".to_string(),
+            vec!["model.test.downstream_0".to_string()],
+        );
+        manifest.child_map.insert(
+            "model.test.lots_of_tests".to_string(),
+            vec![
+                "model.jaffle_shop.orders".to_string(),
+                "test.jaffle_shop.not_null_stg_products".to_string(),
+                "unit_test.jaffle_shop.order_items.test_supply_costs_sum_correctly".to_string(),
+            ],
+        );
+        manifest.child_map.insert(
+            "model.test.four_models".to_string(),
+            vec![
+                "model.test.downstream_0".to_string(),
+                "model.test.downstream_1".to_string(),
+                "model.test.downstream_2".to_string(),
+                "model.test.downstream_3".to_string(),
+            ],
+        );
+
+        let config = Config {
+            model_fanout_threshold: 1,
+            ..Default::default()
+        };
+
+        assert!(!model_fanout(&manifest, "model.test.one_model", &config));
+        assert!(!model_fanout(
+            &manifest,
+            "model.test.lots_of_tests",
+            &config
+        ));
+        assert!(model_fanout(&manifest, "model.test.four_models", &config));
     }
 }
