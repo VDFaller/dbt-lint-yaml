@@ -86,6 +86,7 @@ pub struct SourceFailure {
     pub source_id: String,
     pub description_missing: bool,
     pub duplicate_id: Option<String>,
+    pub is_unused_source: bool,
 }
 
 impl Display for SourceFailure {
@@ -96,6 +97,9 @@ impl Display for SourceFailure {
         }
         if let Some(duplicate_id) = &self.duplicate_id {
             writeln!(f, "  - Duplicate Source Definition: {}", duplicate_id)?;
+        }
+        if self.is_unused_source {
+            writeln!(f, "  - Unused Source")?;
         }
         Ok(())
     }
@@ -430,11 +434,13 @@ fn check_source(
         .contains(&Selector::DuplicateSources)
         .then(|| duplicate_source(manifest, source))
         .flatten();
+    let is_unused_source = unused_source(manifest, source, config);
 
-    (description_missing || duplicate_id.is_some()).then(|| SourceFailure {
+    (description_missing || duplicate_id.is_some() || is_unused_source).then(|| SourceFailure {
         source_id: source.__common_attr__.unique_id.clone(),
         description_missing,
         duplicate_id,
+        is_unused_source,
     })
 }
 
@@ -455,6 +461,17 @@ fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Optio
         .map(|s| s.__common_attr__.unique_id.clone())
 }
 
+fn unused_source(manifest: &DbtManifestV12, source: &ManifestSource, config: &Config) -> bool {
+    // A source is considered "used" if any model depends on it
+    if !config.select.contains(&Selector::UnusedSources) {
+        return false;
+    }
+    manifest
+        .child_map
+        .get(&source.__common_attr__.unique_id)
+        .unwrap_or(&vec![])
+        .is_empty()
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -655,5 +672,32 @@ mod tests {
         };
         let config = Config::default();
         assert!(root_model(model, &config));
+    }
+
+    #[test]
+    fn test_unused_source() {
+        let mut manifest = DbtManifestV12::default();
+        let bad_source_id = "source.test.raw_layer.orders".to_string();
+        let mut bad_source = ManifestSource::default();
+        bad_source.__common_attr__.unique_id = bad_source_id.clone();
+        manifest.child_map.insert(bad_source_id.clone(), vec![]);
+        manifest
+            .sources
+            .insert(bad_source_id.clone(), bad_source.clone());
+
+        let good_source_id = "source.test.raw_layer.customers".to_string();
+        let mut good_source = ManifestSource::default();
+        good_source.__common_attr__.unique_id = good_source_id.clone();
+        manifest
+            .sources
+            .insert(good_source_id.clone(), good_source.clone());
+        manifest
+            .child_map
+            .insert(good_source_id.clone(), vec!["model.test.model".to_string()]);
+
+        let config = Config::default();
+
+        assert!(!unused_source(&manifest, &good_source, &config));
+        assert!(unused_source(&manifest, &bad_source, &config));
     }
 }
