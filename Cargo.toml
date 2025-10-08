@@ -7,13 +7,14 @@ description = "A linter for dbt YAML files"
 default-run = "dbt-lint-yaml"
 
 [dependencies]
-dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
-dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
-dbt-common = { package = "dbt-common", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
-dbt-jinja-utils = { package = "dbt-jinja-utils", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
-dbt-loader = { package = "dbt-loader", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
-dbt-parser = { package = "dbt-parser", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
-dbt-sa-cli = { package = "dbt-sa-cli", git = "https://github.com/dbt-labs/dbt-fusion", rev = "41d17acbb12d09180f32eefe2616e09545efb3d8" }
+dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+dbt-common = { package = "dbt-common", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+dbt-jinja-utils = { package = "dbt-jinja-utils", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+dbt-loader = { package = "dbt-loader", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+dbt-parser = { package = "dbt-parser", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+dbt-sa-cli = { package = "dbt-sa-cli", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+minijinja = { package = "minijinja", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
 dbt-serde_yaml = { git = "https://github.com/sdf-labs/dbt-serde-yaml", rev = "9ccae3e49f77fcd0a92230a1e41c51d74279409f", features = [
   "filename",
   "schemars",

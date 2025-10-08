@@ -1,15 +1,61 @@
 use clap::Parser;
 use dbt_lint_yaml::{check_all, config::Config, writeback};
 
-use dbt_common::{FsResult, cancellation::CancellationTokenSource};
-use dbt_jinja_utils::invocation_args::InvocationArgs;
-use dbt_loader::{args::LoadArgs, load};
+use dbt_common::{CodeLocation, FsResult, cancellation::CancellationTokenSource};
+use dbt_jinja_utils::{
+    invocation_args::InvocationArgs,
+    listener::JinjaTypeCheckingEventListenerFactory,
+};
+use dbt_loader::{args::{IoArgs, LoadArgs}, load};
 use dbt_parser::{args::ResolveArgs, resolver::resolve};
 use dbt_sa_cli::dbt_sa_clap::{Cli, from_main};
 use dbt_schemas::{
     schemas::{Nodes, manifest::build_manifest},
     state::Macros,
 };
+use minijinja::{machinery::Span, TypecheckingEventListener};
+use std::{any::Any, collections::HashSet, path::Path, rc::Rc, sync::Arc};
+
+#[derive(Default)]
+struct NullJinjaTypeCheckingEventListenerFactory;
+
+impl JinjaTypeCheckingEventListenerFactory for NullJinjaTypeCheckingEventListenerFactory {
+    fn create_listener(
+        &self,
+        _io_args: &IoArgs,
+        _location: CodeLocation,
+        _ignored_warning_ids: Option<HashSet<u32>>,
+        _package_name: &str,
+    ) -> Rc<dyn TypecheckingEventListener> {
+        Rc::new(NullTypecheckingEventListener::default())
+    }
+
+    fn destroy_listener(
+        &self,
+        _path: &Path,
+        _listener: Rc<dyn TypecheckingEventListener>,
+    ) {
+    }
+}
+
+#[derive(Default)]
+struct NullTypecheckingEventListener;
+
+impl TypecheckingEventListener for NullTypecheckingEventListener {
+    fn as_any(&self) -> &(dyn Any + 'static) {
+        self
+    }
+
+    fn warn(&self, _message: &str) {}
+
+    fn set_span(&self, _span: &Span) {}
+
+    fn new_block(&self, _level: usize) {}
+
+    fn flush(&self) {}
+
+    fn on_lookup(&self, _span: &Span, _kind: &str, _name: &str, _segments: Vec<Span>) {}
+}
 
 #[tokio::main]
 async fn main() -> FsResult<()> {
@@ -36,14 +82,17 @@ async fn main() -> FsResult<()> {
     let resolve_args = ResolveArgs::try_from_eval_args(&eval_args)?;
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
 
+    let listener_factory: Arc<dyn JinjaTypeCheckingEventListenerFactory> =
+        Arc::new(NullJinjaTypeCheckingEventListenerFactory::default());
+
     let (resolved_state, _jinja_env) = resolve(
         &resolve_args,
         &invocation_args,
         dbt_state,
         Macros::default(),
         Nodes::default(),
-        None, // omit the optional event listener for the simplest case
         &token,
+        listener_factory,
     )
     .await?;
 
