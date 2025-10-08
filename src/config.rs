@@ -13,10 +13,11 @@ pub enum Selector {
     MissingPropertiesFile,
     DuplicateSources,
     ModelFanout,
+    RootModels,
 }
 
 impl Selector {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
@@ -25,6 +26,7 @@ impl Selector {
         Selector::MissingPropertiesFile,
         Selector::DuplicateSources,
         Selector::ModelFanout,
+        Selector::RootModels,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -37,6 +39,7 @@ impl Selector {
             Selector::MissingPropertiesFile => "missing_properties_file",
             Selector::DuplicateSources => "duplicate_sources",
             Selector::ModelFanout => "model_fanout",
+            Selector::RootModels => "root_models",
         }
     }
 }

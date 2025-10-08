@@ -18,6 +18,7 @@ pub struct ModelFailure {
     pub is_missing_properties_file: bool,
     pub is_model_fanout: bool,
     pub is_missing_required_tests: bool,
+    pub is_root_model: bool,
 }
 
 impl Display for ModelFailure {
@@ -40,6 +41,9 @@ impl Display for ModelFailure {
         }
         if self.is_missing_required_tests {
             writeln!(f, "  - Missing required tests")?;
+        }
+        if self.is_root_model {
+            writeln!(f, "  - Root model (no dependencies)")?;
         }
         for column_failure in self.column_failures.values() {
             write!(f, "{}", column_failure)?;
@@ -215,6 +219,7 @@ fn check_model(
         config.select.contains(&Selector::MissingPropertiesFile) && missing_properties_file(node);
     let is_model_fanout = model_fanout(manifest, model_id, config);
     let is_missing_required_tests = missing_required_tests(manifest, model_meta, config);
+    let is_root_model = root_model(model_meta, config);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -230,6 +235,7 @@ fn check_model(
         || is_missing_properties_file
         || is_model_fanout
         || is_missing_required_tests
+        || is_root_model
     {
         Some(ModelFailure {
             model_id: unique_id.clone(),
@@ -240,6 +246,7 @@ fn check_model(
             is_missing_properties_file,
             is_model_fanout,
             is_missing_required_tests,
+            is_root_model,
         })
     } else {
         None
@@ -286,6 +293,13 @@ fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> b
         .count();
 
     return downstream_models > config.model_fanout_threshold;
+}
+
+fn root_model(model: &ManifestModel, config: &Config) -> bool {
+    if !config.select.contains(&Selector::RootModels) {
+        return false;
+    }
+    model.__base_attr__.depends_on.nodes.is_empty()
 }
 
 fn missing_required_tests(
@@ -629,5 +643,17 @@ mod tests {
         config.required_tests = vec!["unique".to_string()];
 
         assert!(missing_required_tests(&manifest, model, &config));
+    }
+
+    #[test]
+    fn test_root_model() {
+        let manifest = manifest_with_inheritable_column();
+        let model_id = "model.test.upstream";
+        let model = match manifest.nodes.get(model_id) {
+            Some(DbtNode::Model(model)) => model,
+            _ => panic!("expected model node"),
+        };
+        let config = Config::default();
+        assert!(root_model(model, &config));
     }
 }
