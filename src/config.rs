@@ -45,6 +45,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "select",
     "pull_column_desc_from_upstream",
     "model_fanout_threshold",
+    "required_tests",
 ];
 
 #[derive(Debug, Error)]
@@ -70,6 +71,8 @@ pub struct Config {
     // because this makes more sense to me
     // even dbt isn't consistent in it, because the table is fct_model_fanout
     pub model_fanout_threshold: usize,
+    #[serde(default)]
+    pub required_tests: Vec<String>,
 }
 
 impl Default for Config {
@@ -78,6 +81,7 @@ impl Default for Config {
             select: default_select(),
             pull_column_desc_from_upstream: default_pull_column_desc_from_upstream(),
             model_fanout_threshold: default_model_fanout_threshold(),
+            required_tests: Vec::new(),
         }
     }
 }

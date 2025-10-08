@@ -17,6 +17,7 @@ pub struct ModelFailure {
     pub is_direct_join_to_source: bool,
     pub is_missing_properties_file: bool,
     pub is_model_fanout: bool,
+	pub is_missing_required_tests: bool,
 }
 
 impl Display for ModelFailure {
@@ -37,6 +38,9 @@ impl Display for ModelFailure {
         if self.is_model_fanout {
             writeln!(f, "  - Model fanout exceeds threshold")?;
         }
+		if self.is_missing_required_tests {
+			writeln!(f, "  - Missing required tests")?;
+		}
         for column_failure in self.column_failures.values() {
             write!(f, "{}", column_failure)?;
         }
@@ -210,6 +214,7 @@ fn check_model(
     let is_missing_properties_file =
         config.select.contains(&Selector::MissingPropertiesFile) && missing_properties_file(node);
     let is_model_fanout = model_fanout(manifest, model_id, config);
+	let is_missing_required_tests = missing_required_tests(manifest, model_meta, config);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -224,6 +229,7 @@ fn check_model(
         || is_direct_join_to_source
         || is_missing_properties_file
         || is_model_fanout
+		|| is_missing_required_tests
     {
         Some(ModelFailure {
             model_id: unique_id.clone(),
@@ -233,6 +239,7 @@ fn check_model(
             is_direct_join_to_source,
             is_missing_properties_file,
             is_model_fanout,
+			is_missing_required_tests,
         })
     } else {
         None
@@ -279,6 +286,29 @@ fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> b
         .count();
 
     return downstream_models > config.model_fanout_threshold;
+}
+
+fn missing_required_tests(manifest: &DbtManifestV12, model: &ManifestModel, config: &Config) -> bool {
+	// for now just check if it has ANY of the required tests
+	if config.required_tests.is_empty() {
+		return false;
+	}
+
+    let existing_tests: Vec<String> = manifest
+        .child_map
+        .get(&model.__common_attr__.unique_id)
+        .into_iter()
+        .flat_map(|children| children.iter())
+        .filter(|id| id.starts_with("test."))
+        // getting the test_ids from child_map is not enough, need to get the actual test names
+        // those are in the manifest nodes themselves
+        .filter_map(|test_id| manifest.nodes.get(test_id).and_then(|node| match node {
+            DbtNode::Test(test) => Some(test.test_metadata.as_ref()?.name.clone()),
+            _ => None,
+        })).collect();
+	let has_required_test = existing_tests.iter().any(|test_name| config.required_tests.contains(test_name));
+
+    !has_required_test
 }
 
 fn check_model_columns(
@@ -566,4 +596,30 @@ mod tests {
         ));
         assert!(model_fanout(&manifest, "model.test.four_models", &config));
     }
+
+    #[test]
+    fn missing_required_tests_returns_true_when_no_children_present() {
+        let mut manifest = DbtManifestV12::default();
+        let model_id = "model.test.without_children".to_string();
+        manifest
+            .nodes
+            .insert(model_id.clone(), DbtNode::Model(Default::default()));
+
+        if let Some(DbtNode::Model(model)) = manifest.nodes.get_mut(&model_id) {
+            model.__common_attr__.unique_id = model_id.clone();
+        } else {
+            panic!("expected model to be inserted");
+        }
+
+        let model = match manifest.nodes.get(&model_id) {
+            Some(DbtNode::Model(model)) => model,
+            _ => panic!("expected model node"),
+        };
+
+        let mut config = Config::default();
+        config.required_tests = vec!["unique".to_string()];
+
+        assert!(missing_required_tests(&manifest, model, &config));
+    }
+
 }
