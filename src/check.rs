@@ -19,6 +19,7 @@ pub struct ModelFailure {
     pub is_model_fanout: bool,
     pub is_missing_required_tests: bool,
     pub is_root_model: bool,
+    pub is_missing_primary_key: bool,
 }
 
 impl Display for ModelFailure {
@@ -47,6 +48,9 @@ impl Display for ModelFailure {
         }
         for column_failure in self.column_failures.values() {
             write!(f, "{}", column_failure)?;
+        }
+        if self.is_missing_primary_key {
+            writeln!(f, "  - Missing Primary Key")?;
         }
         Ok(())
     }
@@ -224,6 +228,7 @@ fn check_model(
     let is_model_fanout = model_fanout(manifest, model_id, config);
     let is_missing_required_tests = missing_required_tests(manifest, model_meta, config);
     let is_root_model = root_model(model_meta, config);
+    let is_missing_primary_key = missing_primary_key(model_meta, config);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -240,6 +245,7 @@ fn check_model(
         || is_model_fanout
         || is_missing_required_tests
         || is_root_model
+        || is_missing_primary_key
     {
         Some(ModelFailure {
             model_id: unique_id.clone(),
@@ -251,6 +257,7 @@ fn check_model(
             is_model_fanout,
             is_missing_required_tests,
             is_root_model,
+            is_missing_primary_key,
         })
     } else {
         None
@@ -304,6 +311,14 @@ fn root_model(model: &ManifestModel, config: &Config) -> bool {
         return false;
     }
     model.__base_attr__.depends_on.nodes.is_empty()
+}
+
+fn missing_primary_key(model: &ManifestModel, config: &Config) -> bool {
+    // We're going to trust that the primary key is defined correctly in the manifest
+    if !config.select.contains(&Selector::MissingPrimaryKey) {
+        return false;
+    }
+    model.primary_key.as_ref().unwrap_or(&vec![]).is_empty()
 }
 
 fn missing_required_tests(
