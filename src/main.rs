@@ -3,17 +3,19 @@ use dbt_lint_yaml::{check_all, config::Config, writeback};
 
 use dbt_common::{CodeLocation, FsResult, cancellation::CancellationTokenSource};
 use dbt_jinja_utils::{
-    invocation_args::InvocationArgs,
-    listener::JinjaTypeCheckingEventListenerFactory,
+    invocation_args::InvocationArgs, listener::JinjaTypeCheckingEventListenerFactory,
 };
-use dbt_loader::{args::{IoArgs, LoadArgs}, load};
+use dbt_loader::{
+    args::{IoArgs, LoadArgs},
+    load,
+};
 use dbt_parser::{args::ResolveArgs, resolver::resolve};
 use dbt_sa_cli::dbt_sa_clap::{Cli, from_main};
 use dbt_schemas::{
     schemas::{Nodes, manifest::build_manifest},
     state::Macros,
 };
-use minijinja::{machinery::Span, TypecheckingEventListener};
+use minijinja::{TypecheckingEventListener, machinery::Span};
 use std::{any::Any, collections::HashSet, path::Path, rc::Rc, sync::Arc};
 
 #[derive(Default)]
@@ -30,12 +32,7 @@ impl JinjaTypeCheckingEventListenerFactory for NullJinjaTypeCheckingEventListene
         Rc::new(NullTypecheckingEventListener::default())
     }
 
-    fn destroy_listener(
-        &self,
-        _path: &Path,
-        _listener: Rc<dyn TypecheckingEventListener>,
-    ) {
-    }
+    fn destroy_listener(&self, _path: &Path, _listener: Rc<dyn TypecheckingEventListener>) {}
 }
 
 #[derive(Default)]
