@@ -1,6 +1,6 @@
 [package]
 name = "dbt-lint-yaml"
-version = "0.2.0"
+version = "0.0.1"
 edition = "2024"
 authors = ["Vince Faller <vdfaller@gmail.com>"]
 description = "A linter for dbt YAML files"
@@ -45,5 +45,6 @@ tag-name = "v{{version}}"
 publish = false
 push = true
 push-remote = "origin"
-sign-tag = false
+sign-tag = true
+sign-commit = true
 
