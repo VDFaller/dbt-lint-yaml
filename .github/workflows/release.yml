@@ -1,12 +1,9 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      release_level:
-        description: "Version bump to pass to cargo-release (patch, minor, major, rc, etc.)"
-        required: true
-        default: patch
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -24,33 +21,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-release
-        run: cargo install cargo-release --locked
-
-      - name: Configure git
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
-
       - name: Run tests
         run: cargo test --locked
-
-      - name: Run cargo release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cargo release ${{ github.event.inputs.release_level }} --execute --no-publish --no-confirm
 
       - name: Determine release version
         id: version
         run: |
-          VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="dbt-lint-yaml") | .version')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="dbt-lint-yaml") | .version')
+
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)" >&2
+            exit 1
+          fi
+
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build release binary
         run: cargo build --release --locked
@@ -67,8 +52,8 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           files: ${{ env.artifact }}
           generate_release_notes: true
         env:
