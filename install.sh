@@ -13,6 +13,9 @@ TARGET_VERSION=""
 RELEASE_JSON=""
 ASSET_NAME=""
 ASSET_URL=""
+ARCHIVE_EXT=""
+BINARY_FILENAME="$PACKAGE_NAME"
+TARGET_PLATFORM=""
 
 td=""
 
@@ -57,7 +60,7 @@ Usage: install.sh [options]
 
 Options:
   --version <VER>   Install a specific version (defaults to latest release)
-  --target <TRIPLE> Install for a specific target (defaults to host platform)
+    --target <TRIPLE> Install for a specific target (defaults to host platform)
   --to <DIR>        Install into the provided directory (default: ~/.local/bin)
   --update          Overwrite an existing installation
   --help            Show this message
@@ -116,10 +119,19 @@ normalize_dest() {
 
 check_dependencies() {
     need curl
-    need tar
     need install
     need mktemp
     need uname
+    case "$ARCHIVE_EXT" in
+        tar.gz)
+            need tar
+            ;;
+        zip)
+            need unzip
+            ;;
+        *)
+            ;;
+    esac
     if ! command -v jq >/dev/null 2>&1; then
         err_and_exit "jq is required to parse GitHub release metadata. Please install jq and re-run."
     fi
@@ -136,7 +148,7 @@ normalize_version() {
 
 detect_target_platform() {
     if [ -n "$TARGET" ]; then
-        echo "$TARGET"
+        TARGET_PLATFORM="$TARGET"
         return
     fi
 
@@ -147,15 +159,39 @@ detect_target_platform() {
         linux)
             case "$arch" in
                 x86_64)
-                    echo "linux-x86_64-musl"
+                    TARGET_PLATFORM="linux-x86_64-musl"
                     ;;
                 *)
                     err_and_exit "unsupported linux architecture" "$arch"
                     ;;
             esac
             ;;
+        darwin)
+            case "$arch" in
+                x86_64)
+                    TARGET_PLATFORM="macos-x86_64"
+                    ;;
+                arm64)
+                    err_and_exit "macOS arm64 is not yet supported" "use --target macos-x86_64 with Rosetta"
+                    ;;
+                *)
+                    err_and_exit "unsupported macOS architecture" "$arch"
+                    ;;
+            esac
+            ;;
         *)
             err_and_exit "unsupported operating system" "$os"
+            ;;
+    esac
+}
+
+set_binary_filename() {
+    case "$TARGET_PLATFORM" in
+        *windows*)
+            BINARY_FILENAME="$PACKAGE_NAME.exe"
+            ;;
+        *)
+            BINARY_FILENAME="$PACKAGE_NAME"
             ;;
     esac
 }
@@ -187,21 +223,36 @@ fetch_release_metadata() {
 select_asset() {
     version="$1"
     target_platform="$2"
-    ASSET_NAME="${PACKAGE_NAME}-${version}-${target_platform}.tar.gz"
-    download_url=$(printf "%s" "$RELEASE_JSON" | jq -r --arg NAME "$ASSET_NAME" '.assets[]? | select(.name == $NAME) | .browser_download_url // empty')
+    for ext in tar.gz zip; do
+        candidate="${PACKAGE_NAME}-${version}-${target_platform}.${ext}"
+        download_url=$(printf "%s" "$RELEASE_JSON" | jq -r --arg NAME "$candidate" '.assets[]? | select(.name == $NAME) | .browser_download_url // empty')
+        if [ -n "$download_url" ]; then
+            ASSET_NAME="$candidate"
+            ARCHIVE_EXT="$ext"
+            break
+        fi
+    done
 
-    [ -n "$download_url" ] || err_and_exit "release does not contain asset" "$ASSET_NAME"
+    [ -n "$download_url" ] || err_and_exit "release does not contain asset" "${PACKAGE_NAME}-${version}-${target_platform}"
 
     ASSET_URL="$download_url"
     log "Found release asset $ASSET_NAME"
 }
 
 check_current_install() {
-    binary_path="$DEST/$PACKAGE_NAME"
+    binary_path="$DEST/$BINARY_FILENAME"
     if [ ! -x "$binary_path" ]; then
         echo ""
         return
     fi
+
+    case "$BINARY_FILENAME" in
+        *.exe)
+            # Windows binaries cannot be executed in POSIX environments for version checks.
+            echo ""
+            return
+            ;;
+    esac
 
     version_output=$("$binary_path" --version 2>/dev/null || true)
     version=$(printf "%s" "$version_output" | awk '{print $2}' | head -n 1)
@@ -221,12 +272,23 @@ install_binary() {
     log_debug "Downloading $ASSET_URL"
     curl -sSfL -o "$archive" "$ASSET_URL" || err_and_exit "failed to download asset" "$ASSET_URL"
 
-    tar -C "$td" -xzf "$archive" || err_and_exit "failed to extract archive" "$archive"
+    case "$ARCHIVE_EXT" in
+        tar.gz)
+            tar -C "$td" -xzf "$archive" || err_and_exit "failed to extract archive" "$archive"
+            ;;
+        zip)
+            unzip -q "$archive" -d "$td" || err_and_exit "failed to extract archive" "$archive"
+            ;;
+        *)
+            err_and_exit "unsupported archive format" "$ARCHIVE_EXT"
+            ;;
+    esac
 
-    binary_path=$(find "$td" -type f -name "$PACKAGE_NAME" -perm -111 | head -n 1)
-    [ -n "$binary_path" ] || err_and_exit "extracted archive does not contain $PACKAGE_NAME"
+    binary_path=$(find "$td" -type f -name "$BINARY_FILENAME" | head -n 1)
+    [ -n "$binary_path" ] || err_and_exit "extracted archive does not contain $BINARY_FILENAME"
 
-    install -m 755 "$binary_path" "$DEST/$PACKAGE_NAME" || err_and_exit "failed to install binary" "$DEST/$PACKAGE_NAME"
+    chmod +x "$binary_path" 2>/dev/null || true
+    install -m 755 "$binary_path" "$DEST/$BINARY_FILENAME" || err_and_exit "failed to install binary" "$DEST/$BINARY_FILENAME"
 
     script_path=$(find "$td" -type f -name "$SCRIPT_NAME" | head -n 1)
     [ -n "$script_path" ] || err_and_exit "extracted archive does not contain $SCRIPT_NAME"
@@ -255,11 +317,11 @@ EOF
 main() {
     parse_args "$@"
     normalize_dest
-    check_dependencies
-
-    target_platform=$(detect_target_platform)
+    detect_target_platform
     fetch_release_metadata "$VERSION"
-    select_asset "$TARGET_VERSION" "$target_platform"
+    select_asset "$TARGET_VERSION" "$TARGET_PLATFORM"
+    set_binary_filename
+    check_dependencies
 
     ensure_destination
 

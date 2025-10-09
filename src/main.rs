@@ -51,7 +51,7 @@ impl JinjaTypeCheckingEventListenerFactory for NullJinjaTypeCheckingEventListene
         _ignored_warning_ids: Option<HashSet<u32>>,
         _package_name: &str,
     ) -> Rc<dyn TypecheckingEventListener> {
-        Rc::new(NullTypecheckingEventListener::default())
+        Rc::new(NullTypecheckingEventListener)
     }
 
     fn destroy_listener(&self, _path: &Path, _listener: Rc<dyn TypecheckingEventListener>) {}
@@ -104,7 +104,7 @@ async fn main() -> FsResult<()> {
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
 
     let listener_factory: Arc<dyn JinjaTypeCheckingEventListenerFactory> =
-        Arc::new(NullJinjaTypeCheckingEventListenerFactory::default());
+        Arc::new(NullJinjaTypeCheckingEventListenerFactory);
 
     let (resolved_state, _jinja_env) = resolve(
         &resolve_args,
@@ -122,7 +122,7 @@ async fn main() -> FsResult<()> {
     let check_result = check_all(&dbt_manifest, &config);
 
     for (model, model_changes) in check_result.model_changes.iter() {
-        println!("Model: {} has found changes", model);
+        println!("Model: {model} has found changes");
         for (column, column_changes) in model_changes.column_changes.iter() {
             for change in column_changes {
                 println!(
@@ -135,7 +135,7 @@ async fn main() -> FsResult<()> {
     }
 
     if let Some(model_changes) =
-        (!check_result.model_changes.is_empty()).then(|| &check_result.model_changes)
+        (!check_result.model_changes.is_empty()).then_some(&check_result.model_changes)
     {
         match writeback::apply_model_changes_with_ruamel(project_dir.as_path(), model_changes) {
             Ok(applied) => {

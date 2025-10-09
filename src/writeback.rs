@@ -111,14 +111,15 @@ fn resolve_helper_path() -> Result<PathBuf, WriteBackError> {
 
     let mut candidates = Vec::new();
 
-    if let Ok(exe_path) = env::current_exe() {
-        if let Some(dir) = exe_path.parent() {
-            candidates.push(dir.join("ruamel_model_changes.py"));
-            candidates.push(dir.join("scripts").join("ruamel_model_changes.py"));
-        }
+    if let Ok(exe_path) = env::current_exe()
+        && let Some(dir) = exe_path.parent()
+    {
+        candidates.push(dir.join("ruamel_model_changes.py"));
+        candidates.push(dir.join("scripts").join("ruamel_model_changes.py"));
     }
 
-    let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ruamel_model_changes.py");
+    let fallback =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ruamel_model_changes.py");
     candidates.push(fallback.clone());
 
     for candidate in &candidates {

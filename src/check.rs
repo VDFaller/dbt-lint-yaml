@@ -49,7 +49,7 @@ impl Display for ModelFailure {
             writeln!(f, "  - Root model (no dependencies)")?;
         }
         for column_failure in self.column_failures.values() {
-            write!(f, "{}", column_failure)?;
+            write!(f, "{column_failure}")?;
         }
         if self.is_missing_primary_key {
             writeln!(f, "  - Missing Primary Key")?;
@@ -107,7 +107,7 @@ impl Display for SourceFailure {
             writeln!(f, "  - Missing Description")?;
         }
         if let Some(duplicate_id) = &self.duplicate_id {
-            writeln!(f, "  - Duplicate Source Definition: {}", duplicate_id)?;
+            writeln!(f, "  - Duplicate Source Definition: {duplicate_id}")?;
         }
         if self.is_unused_source {
             writeln!(f, "  - Unused Source")?;
@@ -132,10 +132,10 @@ impl Display for Failures {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Failures:")?;
         for model_failure in self.models.values() {
-            write!(f, "{}", model_failure)?;
+            write!(f, "{model_failure}")?;
         }
         for source_failure in self.sources.values() {
-            write!(f, "{}", source_failure)?;
+            write!(f, "{source_failure}")?;
         }
         Ok(())
     }
@@ -249,7 +249,7 @@ fn check_model(
     let ColumnCheckResult {
         failures: column_failures,
         column_changes,
-    } = check_model_columns(manifest, model_id, prior_changes, &config);
+    } = check_model_columns(manifest, model_id, prior_changes, config);
 
     let has_column_failures = !column_failures.is_empty();
 
@@ -340,7 +340,7 @@ fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> b
         .filter(|id| id.starts_with("model."))
         .count();
 
-    return downstream_models > config.model_fanout_threshold;
+    downstream_models > config.model_fanout_threshold
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#root-models
@@ -543,7 +543,7 @@ fn missing_source_description(source: &ManifestSource, config: &Config) -> bool 
     if !config.select.contains(&Selector::MissingSourceDescriptions) {
         return false;
     }
-    source.source_description == ""
+    source.source_description.is_empty()
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#duplicate-sources
@@ -612,9 +612,11 @@ mod tests {
                 .__base_attr__
                 .columns
                 .insert("customer_id".to_string(), {
-                    let mut column = DbtColumn::default();
-                    column.name = "customer_id".to_string();
-                    column.description = Some("Upstream description".to_string());
+                    let column = DbtColumn {
+                        name: "customer_id".to_string(),
+                        description: Some("Upstream description".to_string()),
+                        ..Default::default()
+                    };
                     Arc::new(column)
                 });
         }
@@ -626,9 +628,11 @@ mod tests {
                 .__base_attr__
                 .columns
                 .insert("customer_id".to_string(), {
-                    let mut column = DbtColumn::default();
-                    column.name = "customer_id".to_string();
-                    column.description = None;
+                    let column = DbtColumn {
+                        name: "customer_id".to_string(),
+                        description: None,
+                        ..Default::default()
+                    };
                     Arc::new(column)
                 });
         }
@@ -777,8 +781,10 @@ mod tests {
             _ => panic!("expected model node"),
         };
 
-        let mut config = Config::default();
-        config.required_tests = vec!["unique".to_string()];
+        let config = Config {
+            required_tests: vec!["unique".to_string()],
+            ..Default::default()
+        };
 
         assert!(missing_required_tests(&manifest, model, &config));
     }
