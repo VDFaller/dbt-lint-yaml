@@ -97,6 +97,7 @@ pub struct SourceFailure {
     pub duplicate_id: Option<String>,
     pub is_unused_source: bool,
     pub is_missing_source_freshness: bool,
+    pub is_missing_source_description: bool,
 }
 
 impl Display for SourceFailure {
@@ -113,6 +114,9 @@ impl Display for SourceFailure {
         }
         if self.is_missing_source_freshness {
             writeln!(f, "  - Missing Source Freshness")?;
+        }
+        if self.is_missing_source_description {
+            writeln!(f, "  - Missing Source Description")?;
         }
         Ok(())
     }
@@ -506,7 +510,9 @@ fn check_source(
     source: &ManifestSource,
     config: &Config,
 ) -> Option<SourceFailure> {
-    let description_missing = config.select.contains(&Selector::MissingSourceDescriptions)
+    let description_missing = config
+        .select
+        .contains(&Selector::MissingSourceTableDescriptions)
         && source.__common_attr__.description.is_none();
     let duplicate_id = config
         .select
@@ -515,18 +521,29 @@ fn check_source(
         .flatten();
     let is_unused_source = unused_source(manifest, source, config);
     let is_missing_source_freshness = missing_source_freshness(source, config);
+    let is_missing_source_description = missing_source_description(source, config);
 
     (description_missing
         || duplicate_id.is_some()
         || is_unused_source
-        || is_missing_source_freshness)
+        || is_missing_source_freshness
+        || is_missing_source_description)
         .then(|| SourceFailure {
             source_id: source.__common_attr__.unique_id.clone(),
             description_missing,
             duplicate_id,
             is_unused_source,
             is_missing_source_freshness,
+            is_missing_source_description,
         })
+}
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/documentation/#undocumented-sources
+fn missing_source_description(source: &ManifestSource, config: &Config) -> bool {
+    if !config.select.contains(&Selector::MissingSourceDescriptions) {
+        return false;
+    }
+    source.source_description == ""
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#duplicate-sources

@@ -9,6 +9,7 @@ pub enum Selector {
     MissingModelDescriptions,
     MissingModelTags,
     MissingSourceDescriptions,
+    MissingSourceTableDescriptions,
     DirectJoinToSource,
     MissingPropertiesFile,
     DuplicateSources,
@@ -22,11 +23,12 @@ pub enum Selector {
 }
 
 impl Selector {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
         Selector::MissingSourceDescriptions,
+        Selector::MissingSourceTableDescriptions,
         Selector::DirectJoinToSource,
         Selector::MissingPropertiesFile,
         Selector::DuplicateSources,
@@ -45,6 +47,7 @@ impl Selector {
             Selector::MissingModelDescriptions => "missing_model_descriptions",
             Selector::MissingModelTags => "missing_model_tags",
             Selector::MissingSourceDescriptions => "missing_source_descriptions",
+            Selector::MissingSourceTableDescriptions => "missing_source_table_descriptions",
             Selector::DirectJoinToSource => "direct_join_to_source",
             Selector::MissingPropertiesFile => "missing_properties_file",
             Selector::DuplicateSources => "duplicate_sources",
