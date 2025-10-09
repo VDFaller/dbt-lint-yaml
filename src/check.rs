@@ -20,6 +20,7 @@ pub struct ModelFailure {
     pub is_missing_required_tests: bool,
     pub is_root_model: bool,
     pub is_missing_primary_key: bool,
+    pub is_multiple_sources_joined: bool,
 }
 
 impl Display for ModelFailure {
@@ -51,6 +52,9 @@ impl Display for ModelFailure {
         }
         if self.is_missing_primary_key {
             writeln!(f, "  - Missing Primary Key")?;
+        }
+        if self.is_multiple_sources_joined {
+            writeln!(f, "  - Joins multiple sources")?;
         }
         Ok(())
     }
@@ -233,6 +237,7 @@ fn check_model(
     let is_missing_required_tests = missing_required_tests(manifest, model_meta, config);
     let is_root_model = root_model(model_meta, config);
     let is_missing_primary_key = missing_primary_key(model_meta, config);
+    let is_multiple_sources_joined = multiple_sources_joined(model_meta, config);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -250,6 +255,7 @@ fn check_model(
         || is_missing_required_tests
         || is_root_model
         || is_missing_primary_key
+        || is_multiple_sources_joined
     {
         Some(ModelFailure {
             model_id: unique_id.clone(),
@@ -262,6 +268,7 @@ fn check_model(
             is_missing_required_tests,
             is_root_model,
             is_missing_primary_key,
+            is_multiple_sources_joined,
         })
     } else {
         None
@@ -274,6 +281,20 @@ fn check_model(
     });
 
     (model_failure, model_changes)
+}
+
+fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> bool {
+    if !config.select.contains(&Selector::MultipleSourcesJoined) {
+        return false;
+    }
+    let source_dependencies = model
+        .__base_attr__
+        .depends_on
+        .nodes
+        .iter()
+        .filter(|upstream_id| upstream_id.starts_with("source."))
+        .count();
+    source_dependencies > 1
 }
 
 fn direct_join_to_source(model: &ManifestModel) -> bool {
@@ -664,13 +685,13 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!model_fanout(&manifest, "model.test.one_model", &config));
+        assert!(!model_fanout(&manifest, "model.test.one_model", &config), "only 1 downstream");
         assert!(!model_fanout(
             &manifest,
             "model.test.lots_of_tests",
             &config
-        ));
-        assert!(model_fanout(&manifest, "model.test.four_models", &config));
+        ), "lots of tests should not trigger");
+        assert!(model_fanout(&manifest, "model.test.four_models", &config), "4 models exceeds threshold of 1");
     }
 
     #[test]
@@ -733,8 +754,8 @@ mod tests {
 
         let config = Config::default();
 
-        assert!(!unused_source(&manifest, &good_source, &config));
-        assert!(unused_source(&manifest, &bad_source, &config));
+        assert!(!unused_source(&manifest, &good_source, &config), "used source should not trigger");
+        assert!(unused_source(&manifest, &bad_source, &config), "unused source should trigger");
     }
 
     #[test]
@@ -748,7 +769,7 @@ mod tests {
 
         let config = Config::default();
 
-        assert!(missing_source_freshness(&source, &config));
+        assert!(missing_source_freshness(&source, &config), "missing freshness should trigger");
 
         // Freshness with warn_after
         fresh_def.warn_after = Some(FreshnessRules {
@@ -756,6 +777,19 @@ mod tests {
             period: Some(FreshnessPeriod::day),
         });
         source.freshness = Some(fresh_def.clone());
-        assert!(!missing_source_freshness(&source, &config));
+        assert!(!missing_source_freshness(&source, &config), "warn_after should satisfy freshness");
+    }
+
+    #[test]
+    fn test_multiple_sources_joined() {
+        let mut model = ManifestModel::default();
+
+        model.__common_attr__.unique_id = "model.test.target".to_string();
+        model.__base_attr__.depends_on.nodes = vec![
+            "source.test.raw_layer.orders".to_string(),
+            "source.test.raw_layer.customers".to_string(),
+        ];
+        let config = Config::default();
+        assert!(multiple_sources_joined(&model, &config), "2 sources should trigger");
     }
 }
