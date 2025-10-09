@@ -33,3 +33,6 @@ dbt-lint-yaml parse
 
 The rules are controlled by a `dbt-lint.yml` file in the root of your dbt project. 
 The default rules can be found in the [default-dbt-lint.yml](./default-dbt-lint.toml) file.
+
+
+## Current Rules (DOCUMENT ME)
