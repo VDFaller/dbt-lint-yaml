@@ -7,6 +7,7 @@ REPO_OWNER="VDFaller"
 REPO_NAME="dbt-lint-yaml"
 REPO="${REPO_OWNER}/${REPO_NAME}"
 DEFAULT_DEST="$HOME/.local/bin"
+SCRIPT_NAME="ruamel_model_changes.py"
 
 TARGET_VERSION=""
 RELEASE_JSON=""
@@ -226,6 +227,12 @@ install_binary() {
     [ -n "$binary_path" ] || err_and_exit "extracted archive does not contain $PACKAGE_NAME"
 
     install -m 755 "$binary_path" "$DEST/$PACKAGE_NAME" || err_and_exit "failed to install binary" "$DEST/$PACKAGE_NAME"
+
+    script_path=$(find "$td" -type f -name "$SCRIPT_NAME" | head -n 1)
+    [ -n "$script_path" ] || err_and_exit "extracted archive does not contain $SCRIPT_NAME"
+
+    install -d "$DEST/scripts" || err_and_exit "failed to create helper script directory" "$DEST/scripts"
+    install -m 644 "$script_path" "$DEST/scripts/$SCRIPT_NAME" || err_and_exit "failed to install helper script" "$DEST/scripts/$SCRIPT_NAME"
 }
 
 print_path_hint() {
