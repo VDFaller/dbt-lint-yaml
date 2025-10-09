@@ -39,3 +39,11 @@ thiserror = "1.0"
 toml = "0.9.7"
 strsim = "0.11"
 
+[package.metadata.release]
+allow-branch = ["main"]
+tag-name = "v{{version}}"
+publish = false
+push = true
+push-remote = "origin"
+sign-tag = false
+
