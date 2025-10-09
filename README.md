@@ -13,7 +13,7 @@ The goal is to have something like ruff for the yaml portion of dbt projects.
 You can install the latest release from GitHub:
 
 ``` bash
-curl -fsSL https://github.com/VDFaller/dbt-lint-yaml/blob/main/install.sh | sh -s -- --update
+curl -fsSL https://raw.githubusercontent.com/VDFaller/dbt-lint-yaml/refs/heads/main/install.sh | sh -s -- --update
 ```
 
 In addition to Rust, the current write-back flow shells out to a Python helper that
