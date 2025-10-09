@@ -24,6 +24,12 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
+      - name: Install musl toolchain
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
       - name: Determine release version
         id: version
         run: |
@@ -38,16 +44,16 @@ jobs:
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build release binary
-        run: cargo build --release --locked
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
 
       - name: Package artifacts
         run: |
           VERSION=${{ steps.version.outputs.version }}
           mkdir -p dist
-          cp target/release/dbt-lint-yaml dist/dbt-lint-yaml
-          tar -C dist -czf dbt-lint-yaml-${VERSION}-linux-x86_64.tar.gz dbt-lint-yaml
+          cp target/x86_64-unknown-linux-musl/release/dbt-lint-yaml dist/dbt-lint-yaml
+          tar -C dist -czf dbt-lint-yaml-${VERSION}-linux-x86_64-musl.tar.gz dbt-lint-yaml
           rm dist/dbt-lint-yaml
-          echo "artifact=dbt-lint-yaml-${VERSION}-linux-x86_64.tar.gz" >> "$GITHUB_ENV"
+          echo "artifact=dbt-lint-yaml-${VERSION}-linux-x86_64-musl.tar.gz" >> "$GITHUB_ENV"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
