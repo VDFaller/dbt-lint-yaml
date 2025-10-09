@@ -44,7 +44,7 @@ jobs:
       - name: Run cargo release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cargo release ${{ github.event.inputs.release_level }} --execute --no-publish
+        run: cargo release ${{ github.event.inputs.release_level }} --execute --no-publish --no-confirm
 
       - name: Determine release version
         id: version
