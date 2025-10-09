@@ -1,0 +1,20 @@
+select = [
+    "missing_column_descriptions",
+    "missing_model_descriptions",
+    "missing_model_tags",
+    "missing_source_descriptions",
+    "missing_source_table_descriptions",
+    "direct_join_to_source",
+    "missing_properties_file",
+    "duplicate_sources",
+    "model_fanout",
+    "root_models",
+    "unused_sources",
+    "missing_primary_key",
+    "missing_source_freshness",
+    "multiple_sources_joined",
+    "rejoining_of_upstream_concepts",
+]
+pull_column_desc_from_upstream = true
+model_fanout_threshold = 3
+required_tests = []

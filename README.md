@@ -30,3 +30,6 @@ For now we're piggy-backing on [dbt-sa-cli](https://github.com/dbt-labs/dbt-sa-c
 ``` bash
 dbt-lint-yaml parse
 ```
+
+The rules are controlled by a `dbt-lint.yml` file in the root of your dbt project. 
+The default rules can be found in the [default-dbt-lint.yml](./default-dbt-lint.toml) file.

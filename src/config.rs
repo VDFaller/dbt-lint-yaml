@@ -81,7 +81,7 @@ pub enum ConfigError {
     InvalidRoot,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default = "default_select")]
     pub select: Vec<Selector>,
@@ -131,6 +131,15 @@ impl Config {
             return Err(ConfigError::InvalidRoot);
         }
         value.try_into().map_err(ConfigError::Deserialize)
+    }
+
+    pub fn to_str(&self) -> String {
+        toml::to_string_pretty(self).expect("Failed to serialize Config to TOML")
+    }
+
+    pub fn write_to_file(&self, output_path: &std::path::PathBuf) -> std::io::Result<()> {
+        let config_path = output_path;
+        std::fs::write(&config_path, self.to_str())
     }
 }
 

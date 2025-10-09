@@ -6,6 +6,10 @@ authors = ["Vince Faller <vdfaller@gmail.com>"]
 description = "A linter for dbt YAML files"
 default-run = "dbt-lint-yaml"
 
+[features]
+default = []
+write-default-config = []
+
 [dependencies]
 dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
 dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
@@ -38,6 +42,11 @@ serde = { version = "1.0.147", default-features = false, features = ["derive"] }
 thiserror = "1.0"
 toml = "0.9.7"
 strsim = "0.11"
+
+[[bin]]
+name = "write-default-config"
+path = "src/bin/write-default-config.rs"
+required-features = ["write-default-config"]
 
 [package.metadata.release]
 allow-branch = ["main"]
