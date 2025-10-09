@@ -18,6 +18,28 @@ use dbt_schemas::{
 use minijinja::{TypecheckingEventListener, machinery::Span};
 use std::{any::Any, collections::HashSet, path::Path, rc::Rc, sync::Arc};
 
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn maybe_handle_version_override() {
+    use std::ffi::OsStr;
+
+    let mut args = std::env::args_os();
+    // skip program name
+    let _ = args.next();
+
+    for arg in args {
+        if arg == OsStr::new("--") {
+            break;
+        }
+
+        if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
+            println!("{PKG_NAME} {PKG_VERSION}");
+            std::process::exit(0);
+        }
+    }
+}
+
 #[derive(Default)]
 struct NullJinjaTypeCheckingEventListenerFactory;
 
@@ -56,6 +78,8 @@ impl TypecheckingEventListener for NullTypecheckingEventListener {
 
 #[tokio::main]
 async fn main() -> FsResult<()> {
+    maybe_handle_version_override();
+
     let cli = Cli::parse();
     let system_args = from_main(&cli);
 
