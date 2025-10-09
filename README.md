@@ -12,8 +12,16 @@ The goal is to have something like ruff for the yaml portion of dbt projects.
 ## Installation
 You can install the latest release from GitHub:
 
-``` bash
+Unix-like shells:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/VDFaller/dbt-lint-yaml/refs/heads/main/install.sh | sh -s -- --update
+```
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/VDFaller/dbt-lint-yaml/refs/heads/main/install.ps1 | iex
 ```
 
 In addition to Rust, the current write-back flow shells out to a Python helper that
