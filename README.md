@@ -7,18 +7,26 @@ This is a rust based CLI tool that takes inspiration from these three great tool
 * [dbt-checkpoint](https://github.com/dbt-checkpoint/dbt-checkpoint)
 
 The goal is to have something like ruff for the yaml portion of dbt projects.  
-Something like: 
-```
-dbt-lint-yaml check --fix
-```
 
-## Requirements
+
+## Installation
+You can install the latest release from GitHub:
+
+``` bash
+curl -fsSL https://github.com/VDFaller/dbt-lint-yaml/blob/main/install.sh | sh -s -- --update
+```
 
 In addition to Rust, the current write-back flow shells out to a Python helper that
 uses [`ruamel.yaml`](https://pypi.org/project/ruamel.yaml/) to preserve formatting.
-Make sure Python 3 is available on your `$PATH` and install the dependency with:
+Make sure Python 3 is available on your `$PATH` (or your active environment's $PATH) and install the dependency with:
 
 ```bash
 pip install ruamel.yaml
 ```
 
+## Usage
+For now we're piggy-backing on [dbt-sa-cli](https://github.com/dbt-labs/dbt-sa-cli) for command-line interface functionality. So you still have to pass a parse argument.
+
+``` bash
+dbt-lint-yaml parse
+```
