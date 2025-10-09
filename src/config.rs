@@ -9,6 +9,7 @@ pub enum Selector {
     MissingModelDescriptions,
     MissingModelTags,
     MissingSourceDescriptions,
+    MissingSourceTableDescriptions,
     DirectJoinToSource,
     MissingPropertiesFile,
     DuplicateSources,
@@ -16,14 +17,18 @@ pub enum Selector {
     RootModels,
     UnusedSources,
     MissingPrimaryKey,
+    MissingSourceFreshness,
+    MultipleSourcesJoined,
+    RejoiningOfUpstreamConcepts,
 }
 
 impl Selector {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 15] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
         Selector::MissingSourceDescriptions,
+        Selector::MissingSourceTableDescriptions,
         Selector::DirectJoinToSource,
         Selector::MissingPropertiesFile,
         Selector::DuplicateSources,
@@ -31,6 +36,9 @@ impl Selector {
         Selector::RootModels,
         Selector::UnusedSources,
         Selector::MissingPrimaryKey,
+        Selector::MissingSourceFreshness,
+        Selector::MultipleSourcesJoined,
+        Selector::RejoiningOfUpstreamConcepts,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -39,6 +47,7 @@ impl Selector {
             Selector::MissingModelDescriptions => "missing_model_descriptions",
             Selector::MissingModelTags => "missing_model_tags",
             Selector::MissingSourceDescriptions => "missing_source_descriptions",
+            Selector::MissingSourceTableDescriptions => "missing_source_table_descriptions",
             Selector::DirectJoinToSource => "direct_join_to_source",
             Selector::MissingPropertiesFile => "missing_properties_file",
             Selector::DuplicateSources => "duplicate_sources",
@@ -46,6 +55,9 @@ impl Selector {
             Selector::RootModels => "root_models",
             Selector::UnusedSources => "unused_sources",
             Selector::MissingPrimaryKey => "missing_primary_key",
+            Selector::MissingSourceFreshness => "missing_source_freshness",
+            Selector::MultipleSourcesJoined => "multiple_sources_joined",
+            Selector::RejoiningOfUpstreamConcepts => "rejoining_of_upstream_concepts",
         }
     }
 }

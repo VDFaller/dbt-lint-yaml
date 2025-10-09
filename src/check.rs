@@ -20,6 +20,8 @@ pub struct ModelFailure {
     pub is_missing_required_tests: bool,
     pub is_root_model: bool,
     pub is_missing_primary_key: bool,
+    pub is_multiple_sources_joined: bool,
+    pub is_rejoining_of_upstream_concepts: bool,
 }
 
 impl Display for ModelFailure {
@@ -51,6 +53,9 @@ impl Display for ModelFailure {
         }
         if self.is_missing_primary_key {
             writeln!(f, "  - Missing Primary Key")?;
+        }
+        if self.is_multiple_sources_joined {
+            writeln!(f, "  - Joins multiple sources")?;
         }
         Ok(())
     }
@@ -91,6 +96,8 @@ pub struct SourceFailure {
     pub description_missing: bool,
     pub duplicate_id: Option<String>,
     pub is_unused_source: bool,
+    pub is_missing_source_freshness: bool,
+    pub is_missing_source_description: bool,
 }
 
 impl Display for SourceFailure {
@@ -104,6 +111,12 @@ impl Display for SourceFailure {
         }
         if self.is_unused_source {
             writeln!(f, "  - Unused Source")?;
+        }
+        if self.is_missing_source_freshness {
+            writeln!(f, "  - Missing Source Freshness")?;
+        }
+        if self.is_missing_source_description {
+            writeln!(f, "  - Missing Source Description")?;
         }
         Ok(())
     }
@@ -229,6 +242,9 @@ fn check_model(
     let is_missing_required_tests = missing_required_tests(manifest, model_meta, config);
     let is_root_model = root_model(model_meta, config);
     let is_missing_primary_key = missing_primary_key(model_meta, config);
+    let is_multiple_sources_joined = multiple_sources_joined(model_meta, config);
+    let is_rejoining_of_upstream_concepts =
+        rejoining_of_upstream_concepts(manifest, model_meta, config);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -246,6 +262,8 @@ fn check_model(
         || is_missing_required_tests
         || is_root_model
         || is_missing_primary_key
+        || is_multiple_sources_joined
+        || is_rejoining_of_upstream_concepts
     {
         Some(ModelFailure {
             model_id: unique_id.clone(),
@@ -258,6 +276,8 @@ fn check_model(
             is_missing_required_tests,
             is_root_model,
             is_missing_primary_key,
+            is_multiple_sources_joined,
+            is_rejoining_of_upstream_concepts,
         })
     } else {
         None
@@ -272,6 +292,22 @@ fn check_model(
     (model_failure, model_changes)
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
+fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> bool {
+    if !config.select.contains(&Selector::MultipleSourcesJoined) {
+        return false;
+    }
+    let source_dependencies = model
+        .__base_attr__
+        .depends_on
+        .nodes
+        .iter()
+        .filter(|upstream_id| upstream_id.starts_with("source."))
+        .count();
+    source_dependencies > 1
+}
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#direct-join-to-source
 fn direct_join_to_source(model: &ManifestModel) -> bool {
     let depends_on = &model.__base_attr__.depends_on.nodes;
     if depends_on.len() < 2 {
@@ -291,6 +327,7 @@ fn missing_properties_file(node: &DbtNode) -> bool {
     }
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
 fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> bool {
     if !config.select.contains(&Selector::ModelFanout) {
         return false;
@@ -306,6 +343,7 @@ fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> b
     return downstream_models > config.model_fanout_threshold;
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#root-models
 fn root_model(model: &ManifestModel, config: &Config) -> bool {
     if !config.select.contains(&Selector::RootModels) {
         return false;
@@ -313,12 +351,42 @@ fn root_model(model: &ManifestModel, config: &Config) -> bool {
     model.__base_attr__.depends_on.nodes.is_empty()
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-primary-key-tests
 fn missing_primary_key(model: &ManifestModel, config: &Config) -> bool {
     // We're going to trust that the primary key is defined correctly in the manifest
     if !config.select.contains(&Selector::MissingPrimaryKey) {
         return false;
     }
     model.primary_key.as_ref().unwrap_or(&vec![]).is_empty()
+}
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#rejoining-of-upstream-concepts
+fn rejoining_of_upstream_concepts(
+    manifest: &DbtManifestV12,
+    model: &ManifestModel,
+    config: &Config,
+) -> bool {
+    // TODO: make this return better than a bool
+    if !config
+        .select
+        .contains(&Selector::RejoiningOfUpstreamConcepts)
+    {
+        return false;
+    }
+    let base_dependencies = &model.__base_attr__.depends_on.nodes;
+
+    for upstream_id in base_dependencies {
+        if let Some(DbtNode::Model(upstream_model)) = manifest.nodes.get(upstream_id) {
+            let upstream_dependencies = &upstream_model.__base_attr__.depends_on.nodes;
+            for dep in upstream_dependencies {
+                if base_dependencies.contains(dep) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn missing_required_tests(
@@ -442,7 +510,9 @@ fn check_source(
     source: &ManifestSource,
     config: &Config,
 ) -> Option<SourceFailure> {
-    let description_missing = config.select.contains(&Selector::MissingSourceDescriptions)
+    let description_missing = config
+        .select
+        .contains(&Selector::MissingSourceTableDescriptions)
         && source.__common_attr__.description.is_none();
     let duplicate_id = config
         .select
@@ -450,15 +520,33 @@ fn check_source(
         .then(|| duplicate_source(manifest, source))
         .flatten();
     let is_unused_source = unused_source(manifest, source, config);
+    let is_missing_source_freshness = missing_source_freshness(source, config);
+    let is_missing_source_description = missing_source_description(source, config);
 
-    (description_missing || duplicate_id.is_some() || is_unused_source).then(|| SourceFailure {
-        source_id: source.__common_attr__.unique_id.clone(),
-        description_missing,
-        duplicate_id,
-        is_unused_source,
-    })
+    (description_missing
+        || duplicate_id.is_some()
+        || is_unused_source
+        || is_missing_source_freshness
+        || is_missing_source_description)
+        .then(|| SourceFailure {
+            source_id: source.__common_attr__.unique_id.clone(),
+            description_missing,
+            duplicate_id,
+            is_unused_source,
+            is_missing_source_freshness,
+            is_missing_source_description,
+        })
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/documentation/#undocumented-sources
+fn missing_source_description(source: &ManifestSource, config: &Config) -> bool {
+    if !config.select.contains(&Selector::MissingSourceDescriptions) {
+        return false;
+    }
+    source.source_description == ""
+}
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#duplicate-sources
 fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Option<String> {
     if source.__common_attr__.name == source.identifier {
         return None;
@@ -476,6 +564,7 @@ fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Optio
         .map(|s| s.__common_attr__.unique_id.clone())
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#unused-sources
 fn unused_source(manifest: &DbtManifestV12, source: &ManifestSource, config: &Config) -> bool {
     // A source is considered "used" if any model depends on it
     if !config.select.contains(&Selector::UnusedSources) {
@@ -487,6 +576,18 @@ fn unused_source(manifest: &DbtManifestV12, source: &ManifestSource, config: &Co
         .unwrap_or(&vec![])
         .is_empty()
 }
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-source-freshness
+fn missing_source_freshness(source: &ManifestSource, config: &Config) -> bool {
+    if !config.select.contains(&Selector::MissingSourceFreshness) {
+        return false;
+    }
+    if let Some(freshness) = &source.freshness {
+        return freshness.warn_after.is_none() && freshness.error_after.is_none();
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -643,13 +744,18 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!model_fanout(&manifest, "model.test.one_model", &config));
-        assert!(!model_fanout(
-            &manifest,
-            "model.test.lots_of_tests",
-            &config
-        ));
-        assert!(model_fanout(&manifest, "model.test.four_models", &config));
+        assert!(
+            !model_fanout(&manifest, "model.test.one_model", &config),
+            "only 1 downstream"
+        );
+        assert!(
+            !model_fanout(&manifest, "model.test.lots_of_tests", &config),
+            "lots of tests should not trigger"
+        );
+        assert!(
+            model_fanout(&manifest, "model.test.four_models", &config),
+            "4 models exceeds threshold of 1"
+        );
     }
 
     #[test]
@@ -712,7 +818,100 @@ mod tests {
 
         let config = Config::default();
 
-        assert!(!unused_source(&manifest, &good_source, &config));
-        assert!(unused_source(&manifest, &bad_source, &config));
+        assert!(
+            !unused_source(&manifest, &good_source, &config),
+            "used source should not trigger"
+        );
+        assert!(
+            unused_source(&manifest, &bad_source, &config),
+            "unused source should trigger"
+        );
+    }
+
+    #[test]
+    fn test_missing_source_freshness() {
+        use dbt_schemas::schemas::common::{FreshnessDefinition, FreshnessPeriod, FreshnessRules};
+
+        let mut source = ManifestSource::default();
+        // Missing Freshness
+        let mut fresh_def = FreshnessDefinition::default();
+        source.freshness = Some(fresh_def.clone());
+
+        let config = Config::default();
+
+        assert!(
+            missing_source_freshness(&source, &config),
+            "missing freshness should trigger"
+        );
+
+        // Freshness with warn_after
+        fresh_def.warn_after = Some(FreshnessRules {
+            count: Some(1),
+            period: Some(FreshnessPeriod::day),
+        });
+        source.freshness = Some(fresh_def.clone());
+        assert!(
+            !missing_source_freshness(&source, &config),
+            "warn_after should satisfy freshness"
+        );
+    }
+
+    #[test]
+    fn test_multiple_sources_joined() {
+        let mut model = ManifestModel::default();
+
+        model.__common_attr__.unique_id = "model.test.target".to_string();
+        model.__base_attr__.depends_on.nodes = vec![
+            "source.test.raw_layer.orders".to_string(),
+            "source.test.raw_layer.customers".to_string(),
+        ];
+        let config = Config::default();
+        assert!(
+            multiple_sources_joined(&model, &config),
+            "2 sources should trigger"
+        );
+    }
+
+    #[test]
+    fn test_rejoining_of_upstream_concepts() {
+        let mut manifest = DbtManifestV12::default();
+
+        manifest.nodes.insert(
+            "model.test.upstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.test.midstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.test.downstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+
+        if let Some(DbtNode::Model(upstream)) = manifest.nodes.get_mut("model.test.upstream") {
+            upstream.__common_attr__.unique_id = "model.test.upstream".to_string();
+        }
+
+        if let Some(DbtNode::Model(midstream)) = manifest.nodes.get_mut("model.test.midstream") {
+            midstream.__common_attr__.unique_id = "model.test.midstream".to_string();
+            midstream.__base_attr__.depends_on.nodes = vec!["model.test.upstream".to_string()];
+        }
+
+        if let Some(DbtNode::Model(downstream)) = manifest.nodes.get_mut("model.test.downstream") {
+            downstream.__common_attr__.unique_id = "model.test.downstream".to_string();
+            downstream.__base_attr__.depends_on.nodes = vec![
+                "model.test.upstream".to_string(),
+                "model.test.midstream".to_string(),
+            ];
+        }
+
+        let Some(DbtNode::Model(downstream)) = manifest.nodes.get("model.test.downstream") else {
+            panic!("expected downstream model");
+        };
+        let config = Config::default();
+        assert!(rejoining_of_upstream_concepts(
+            &manifest, downstream, &config
+        ));
     }
 }
