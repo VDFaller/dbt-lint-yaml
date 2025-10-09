@@ -18,10 +18,11 @@ pub enum Selector {
     MissingPrimaryKey,
     MissingSourceFreshness,
     MultipleSourcesJoined,
+    RejoiningOfUpstreamConcepts,
 }
 
 impl Selector {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
@@ -35,6 +36,7 @@ impl Selector {
         Selector::MissingPrimaryKey,
         Selector::MissingSourceFreshness,
         Selector::MultipleSourcesJoined,
+        Selector::RejoiningOfUpstreamConcepts,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -52,6 +54,7 @@ impl Selector {
             Selector::MissingPrimaryKey => "missing_primary_key",
             Selector::MissingSourceFreshness => "missing_source_freshness",
             Selector::MultipleSourcesJoined => "multiple_sources_joined",
+            Selector::RejoiningOfUpstreamConcepts => "rejoining_of_upstream_concepts",
         }
     }
 }

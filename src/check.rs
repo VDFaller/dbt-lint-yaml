@@ -21,6 +21,7 @@ pub struct ModelFailure {
     pub is_root_model: bool,
     pub is_missing_primary_key: bool,
     pub is_multiple_sources_joined: bool,
+    pub is_rejoining_of_upstream_concepts: bool,
 }
 
 impl Display for ModelFailure {
@@ -238,6 +239,8 @@ fn check_model(
     let is_root_model = root_model(model_meta, config);
     let is_missing_primary_key = missing_primary_key(model_meta, config);
     let is_multiple_sources_joined = multiple_sources_joined(model_meta, config);
+    let is_rejoining_of_upstream_concepts =
+        rejoining_of_upstream_concepts(manifest, model_meta, config);
 
     let ColumnCheckResult {
         failures: column_failures,
@@ -256,6 +259,7 @@ fn check_model(
         || is_root_model
         || is_missing_primary_key
         || is_multiple_sources_joined
+        || is_rejoining_of_upstream_concepts
     {
         Some(ModelFailure {
             model_id: unique_id.clone(),
@@ -269,6 +273,7 @@ fn check_model(
             is_root_model,
             is_missing_primary_key,
             is_multiple_sources_joined,
+            is_rejoining_of_upstream_concepts,
         })
     } else {
         None
@@ -344,6 +349,35 @@ fn missing_primary_key(model: &ManifestModel, config: &Config) -> bool {
         return false;
     }
     model.primary_key.as_ref().unwrap_or(&vec![]).is_empty()
+}
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#rejoining-of-upstream-concepts
+fn rejoining_of_upstream_concepts(
+    manifest: &DbtManifestV12,
+    model: &ManifestModel,
+    config: &Config,
+) -> bool {
+    // TODO: make this return better than a bool
+    if !config
+        .select
+        .contains(&Selector::RejoiningOfUpstreamConcepts)
+    {
+        return false;
+    }
+    let base_dependencies = &model.__base_attr__.depends_on.nodes;
+
+    for upstream_id in base_dependencies {
+        if let Some(DbtNode::Model(upstream_model)) = manifest.nodes.get(upstream_id) {
+            let upstream_dependencies = &upstream_model.__base_attr__.depends_on.nodes;
+            for dep in upstream_dependencies {
+                if base_dependencies.contains(dep) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn missing_required_tests(
@@ -685,13 +719,18 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!model_fanout(&manifest, "model.test.one_model", &config), "only 1 downstream");
-        assert!(!model_fanout(
-            &manifest,
-            "model.test.lots_of_tests",
-            &config
-        ), "lots of tests should not trigger");
-        assert!(model_fanout(&manifest, "model.test.four_models", &config), "4 models exceeds threshold of 1");
+        assert!(
+            !model_fanout(&manifest, "model.test.one_model", &config),
+            "only 1 downstream"
+        );
+        assert!(
+            !model_fanout(&manifest, "model.test.lots_of_tests", &config),
+            "lots of tests should not trigger"
+        );
+        assert!(
+            model_fanout(&manifest, "model.test.four_models", &config),
+            "4 models exceeds threshold of 1"
+        );
     }
 
     #[test]
@@ -754,8 +793,14 @@ mod tests {
 
         let config = Config::default();
 
-        assert!(!unused_source(&manifest, &good_source, &config), "used source should not trigger");
-        assert!(unused_source(&manifest, &bad_source, &config), "unused source should trigger");
+        assert!(
+            !unused_source(&manifest, &good_source, &config),
+            "used source should not trigger"
+        );
+        assert!(
+            unused_source(&manifest, &bad_source, &config),
+            "unused source should trigger"
+        );
     }
 
     #[test]
@@ -769,7 +814,10 @@ mod tests {
 
         let config = Config::default();
 
-        assert!(missing_source_freshness(&source, &config), "missing freshness should trigger");
+        assert!(
+            missing_source_freshness(&source, &config),
+            "missing freshness should trigger"
+        );
 
         // Freshness with warn_after
         fresh_def.warn_after = Some(FreshnessRules {
@@ -777,7 +825,10 @@ mod tests {
             period: Some(FreshnessPeriod::day),
         });
         source.freshness = Some(fresh_def.clone());
-        assert!(!missing_source_freshness(&source, &config), "warn_after should satisfy freshness");
+        assert!(
+            !missing_source_freshness(&source, &config),
+            "warn_after should satisfy freshness"
+        );
     }
 
     #[test]
@@ -790,6 +841,52 @@ mod tests {
             "source.test.raw_layer.customers".to_string(),
         ];
         let config = Config::default();
-        assert!(multiple_sources_joined(&model, &config), "2 sources should trigger");
+        assert!(
+            multiple_sources_joined(&model, &config),
+            "2 sources should trigger"
+        );
+    }
+
+    #[test]
+    fn test_rejoining_of_upstream_concepts() {
+        let mut manifest = DbtManifestV12::default();
+
+        manifest.nodes.insert(
+            "model.test.upstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.test.midstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.test.downstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+
+        if let Some(DbtNode::Model(upstream)) = manifest.nodes.get_mut("model.test.upstream") {
+            upstream.__common_attr__.unique_id = "model.test.upstream".to_string();
+        }
+
+        if let Some(DbtNode::Model(midstream)) = manifest.nodes.get_mut("model.test.midstream") {
+            midstream.__common_attr__.unique_id = "model.test.midstream".to_string();
+            midstream.__base_attr__.depends_on.nodes = vec!["model.test.upstream".to_string()];
+        }
+
+        if let Some(DbtNode::Model(downstream)) = manifest.nodes.get_mut("model.test.downstream") {
+            downstream.__common_attr__.unique_id = "model.test.downstream".to_string();
+            downstream.__base_attr__.depends_on.nodes = vec![
+                "model.test.upstream".to_string(),
+                "model.test.midstream".to_string(),
+            ];
+        }
+
+        let Some(DbtNode::Model(downstream)) = manifest.nodes.get("model.test.downstream") else {
+            panic!("expected downstream model");
+        };
+        let config = Config::default();
+        assert!(rejoining_of_upstream_concepts(
+            &manifest, downstream, &config
+        ));
     }
 }
