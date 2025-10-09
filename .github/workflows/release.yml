@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (omit the 'v' prefix)"
+        required: true
 
 permissions:
   contents: write
@@ -12,8 +17,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_mode: ${{ steps.version.outputs.release_mode }}
 
     steps:
       - name: Checkout repository
@@ -24,46 +33,137 @@ jobs:
       - name: Run tests
         run: cargo test --locked
 
-      - name: Install musl toolchain
-        run: |
-          rustup target add x86_64-unknown-linux-musl
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-
       - name: Determine release version
         id: version
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version || '' }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          DISPATCHED=$(printf "%s" "$DISPATCH_VERSION" | sed 's/^v//')
+          if [ -n "$DISPATCHED" ]; then
+            TAG_VERSION="$DISPATCHED"
+            RELEASE_MODE="dry-run"
+          else
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            RELEASE_MODE="release"
+          fi
+
           CARGO_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name=="dbt-lint-yaml") | .version')
 
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
-            echo "Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)" >&2
-            exit 1
+            if [ "$RELEASE_MODE" = "release" ]; then
+              echo "Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)" >&2
+              exit 1
+            else
+              echo "::warning::Requested dry-run version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            fi
           fi
 
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_mode=$RELEASE_MODE" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - name: linux-x86_64
+            runs-on: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset_suffix: linux-x86_64-musl
+            archive_ext: tar.gz
+            binary_path: target/x86_64-unknown-linux-musl/release/dbt-lint-yaml
+          - name: macos-x86_64
+            runs-on: macos-latest
+            target: x86_64-apple-darwin
+            asset_suffix: macos-x86_64
+            archive_ext: tar.gz
+            binary_path: target/x86_64-apple-darwin/release/dbt-lint-yaml
+          - name: windows-x86_64
+            runs-on: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_suffix: windows-x86_64
+            archive_ext: zip
+            binary_path: target/x86_64-pc-windows-msvc/release/dbt-lint-yaml.exe
+
+    runs-on: ${{ matrix.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install additional tooling (Linux)
+        if: matrix.name == 'linux-x86_64'
+        run: |
+          rustup target add ${{ matrix.target }}
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install Rust target (non-Linux)
+        if: matrix.name != 'linux-x86_64'
+        run: |
+          rustup target add ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: Package artifacts
+      - name: Package artifact (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
         run: |
-          VERSION=${{ steps.version.outputs.version }}
-          mkdir -p dist
+          VERSION=${{ needs.prepare.outputs.version }}
           mkdir -p dist/scripts
-          cp target/x86_64-unknown-linux-musl/release/dbt-lint-yaml dist/dbt-lint-yaml
+          cp ${{ matrix.binary_path }} dist/dbt-lint-yaml
           cp scripts/ruamel_model_changes.py dist/scripts/ruamel_model_changes.py
-          tar -C dist -czf dbt-lint-yaml-${VERSION}-linux-x86_64-musl.tar.gz dbt-lint-yaml scripts/ruamel_model_changes.py
-          rm dist/dbt-lint-yaml dist/scripts/ruamel_model_changes.py
+          tar -C dist -czf dbt-lint-yaml-${VERSION}-${{ matrix.asset_suffix }}.tar.gz dbt-lint-yaml scripts/ruamel_model_changes.py
+          rm dist/dbt-lint-yaml
+          rm dist/scripts/ruamel_model_changes.py
           rmdir dist/scripts
-          echo "artifact=dbt-lint-yaml-${VERSION}-linux-x86_64-musl.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package artifact (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $version = '${{ needs.prepare.outputs.version }}'
+          $dist = Join-Path (Get-Location) 'dist'
+          $scripts = Join-Path $dist 'scripts'
+          New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+          Copy-Item '${{ matrix.binary_path }}' (Join-Path $dist 'dbt-lint-yaml.exe') -Force
+          Copy-Item 'scripts/ruamel_model_changes.py' (Join-Path $scripts 'ruamel_model_changes.py') -Force
+          $archive = "dbt-lint-yaml-$version-${{ matrix.asset_suffix }}.zip"
+          if (Test-Path $archive) { Remove-Item $archive }
+          Compress-Archive -Path (Join-Path $dist 'dbt-lint-yaml.exe'), (Join-Path $scripts 'ruamel_model_changes.py') -DestinationPath $archive
+          Remove-Item (Join-Path $dist 'dbt-lint-yaml.exe')
+          Remove-Item (Join-Path $scripts 'ruamel_model_changes.py')
+          Remove-Item $scripts
+          Remove-Item $dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-lint-yaml-${{ needs.prepare.outputs.version }}-${{ matrix.asset_suffix }}
+          path: dbt-lint-yaml-${{ needs.prepare.outputs.version }}-${{ matrix.asset_suffix }}.${{ matrix.archive_ext }}
+
+  release:
+    needs:
+      - prepare
+      - build
+    if: needs.prepare.outputs.release_mode == 'release'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          files: ${{ env.artifact }}
+          files: dist/**/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
