@@ -8,12 +8,10 @@ pub(crate) fn get_upstream_col_desc(
     node_id: &str,
     col_name: &str,
 ) -> Option<String> {
-    let Some(upstream_ids) = manifest.nodes.get(node_id).and_then(|node| match node {
+    let upstream_ids = manifest.nodes.get(node_id).and_then(|node| match node {
         DbtNode::Model(model) => Some(model.__base_attr__.depends_on.nodes.clone()),
         _ => None,
-    }) else {
-        return None;
-    };
+    })?;
 
     // check the changes first on the assumption that manifest will be much bigger than changes
     if let Some(changes) = model_changes {

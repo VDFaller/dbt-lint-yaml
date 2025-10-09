@@ -108,7 +108,7 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn from_toml(project_dir: &std::path::PathBuf) -> Self {
+    pub fn from_toml(project_dir: &std::path::Path) -> Self {
         let config_path = project_dir.join("dbt-lint.toml");
         if config_path.exists() {
             let config_str =
@@ -119,7 +119,7 @@ impl Config {
         }
     }
 
-    pub fn from_str(toml_str: &str) -> Self {
+    pub fn from_toml_str(toml_str: &str) -> Self {
         Self::try_from_str(toml_str).unwrap_or_else(|err| panic!("{err}"))
     }
 
@@ -139,7 +139,7 @@ impl Config {
 
     pub fn write_to_file(&self, output_path: &std::path::PathBuf) -> std::io::Result<()> {
         let config_path = output_path;
-        std::fs::write(&config_path, self.to_str())
+        std::fs::write(config_path, self.to_str())
     }
 }
 
@@ -206,13 +206,13 @@ mod tests {
     }
 
     #[test]
-    fn test_from_str() {
+    fn test_from_toml_str() {
         let toml_str = r#"
             select = ["missing_column_descriptions", "missing_model_tags"]
             pull_column_desc_from_upstream = false
             model_fanout_threshold = 4
         "#;
-        let config = Config::from_str(toml_str);
+        let config = Config::from_toml_str(toml_str);
         assert_eq!(
             config.select,
             vec![
@@ -220,7 +220,7 @@ mod tests {
                 Selector::MissingModelTags
             ]
         );
-        assert_eq!(config.pull_column_desc_from_upstream, false);
+        assert!(!config.pull_column_desc_from_upstream);
         assert_eq!(config.model_fanout_threshold, 4);
     }
 
