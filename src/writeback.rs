@@ -118,7 +118,8 @@ fn resolve_helper_path() -> Result<PathBuf, WriteBackError> {
         }
     }
 
-    let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ruamel_model_changes.py");
+    let fallback =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ruamel_model_changes.py");
     candidates.push(fallback.clone());
 
     for candidate in &candidates {
