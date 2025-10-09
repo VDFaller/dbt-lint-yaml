@@ -50,9 +50,12 @@ jobs:
         run: |
           VERSION=${{ steps.version.outputs.version }}
           mkdir -p dist
+          mkdir -p dist/scripts
           cp target/x86_64-unknown-linux-musl/release/dbt-lint-yaml dist/dbt-lint-yaml
-          tar -C dist -czf dbt-lint-yaml-${VERSION}-linux-x86_64-musl.tar.gz dbt-lint-yaml
-          rm dist/dbt-lint-yaml
+          cp scripts/ruamel_model_changes.py dist/scripts/ruamel_model_changes.py
+          tar -C dist -czf dbt-lint-yaml-${VERSION}-linux-x86_64-musl.tar.gz dbt-lint-yaml scripts/ruamel_model_changes.py
+          rm dist/dbt-lint-yaml dist/scripts/ruamel_model_changes.py
+          rmdir dist/scripts
           echo "artifact=dbt-lint-yaml-${VERSION}-linux-x86_64-musl.tar.gz" >> "$GITHUB_ENV"
 
       - name: Create GitHub release

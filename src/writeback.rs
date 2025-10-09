@@ -2,6 +2,7 @@ use crate::check::ModelChanges;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    env,
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -51,11 +52,7 @@ pub fn apply_model_changes_with_ruamel(
         return Ok(Vec::new());
     }
 
-    let helper_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ruamel_model_changes.py");
-    if !helper_path.exists() {
-        return Err(WriteBackError::HelperMissing(helper_path));
-    }
+    let helper_path = resolve_helper_path()?;
 
     let mut results = Vec::new();
 
@@ -101,6 +98,36 @@ pub fn apply_model_changes_with_ruamel(
     }
 
     Ok(results)
+}
+
+fn resolve_helper_path() -> Result<PathBuf, WriteBackError> {
+    if let Ok(path) = env::var("DBT_LINT_YAML_HELPER") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(WriteBackError::HelperMissing(path));
+    }
+
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(dir) = exe_path.parent() {
+            candidates.push(dir.join("ruamel_model_changes.py"));
+            candidates.push(dir.join("scripts").join("ruamel_model_changes.py"));
+        }
+    }
+
+    let fallback = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ruamel_model_changes.py");
+    candidates.push(fallback.clone());
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(WriteBackError::HelperMissing(fallback))
 }
 
 fn invoke_python_helper(
