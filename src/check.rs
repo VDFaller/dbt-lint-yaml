@@ -288,6 +288,7 @@ fn check_model(
     (model_failure, model_changes)
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
 fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> bool {
     if !config.select.contains(&Selector::MultipleSourcesJoined) {
         return false;
@@ -302,6 +303,7 @@ fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> bool {
     source_dependencies > 1
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#direct-join-to-source
 fn direct_join_to_source(model: &ManifestModel) -> bool {
     let depends_on = &model.__base_attr__.depends_on.nodes;
     if depends_on.len() < 2 {
@@ -321,6 +323,7 @@ fn missing_properties_file(node: &DbtNode) -> bool {
     }
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
 fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> bool {
     if !config.select.contains(&Selector::ModelFanout) {
         return false;
@@ -336,6 +339,7 @@ fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> b
     return downstream_models > config.model_fanout_threshold;
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#root-models
 fn root_model(model: &ManifestModel, config: &Config) -> bool {
     if !config.select.contains(&Selector::RootModels) {
         return false;
@@ -343,6 +347,7 @@ fn root_model(model: &ManifestModel, config: &Config) -> bool {
     model.__base_attr__.depends_on.nodes.is_empty()
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-primary-key-tests
 fn missing_primary_key(model: &ManifestModel, config: &Config) -> bool {
     // We're going to trust that the primary key is defined correctly in the manifest
     if !config.select.contains(&Selector::MissingPrimaryKey) {
@@ -524,6 +529,7 @@ fn check_source(
         })
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#duplicate-sources
 fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Option<String> {
     if source.__common_attr__.name == source.identifier {
         return None;
@@ -541,6 +547,7 @@ fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Optio
         .map(|s| s.__common_attr__.unique_id.clone())
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#unused-sources
 fn unused_source(manifest: &DbtManifestV12, source: &ManifestSource, config: &Config) -> bool {
     // A source is considered "used" if any model depends on it
     if !config.select.contains(&Selector::UnusedSources) {
@@ -553,6 +560,7 @@ fn unused_source(manifest: &DbtManifestV12, source: &ManifestSource, config: &Co
         .is_empty()
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-source-freshness
 fn missing_source_freshness(source: &ManifestSource, config: &Config) -> bool {
     if !config.select.contains(&Selector::MissingSourceFreshness) {
         return false;
