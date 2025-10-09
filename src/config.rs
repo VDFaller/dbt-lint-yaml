@@ -16,10 +16,11 @@ pub enum Selector {
     RootModels,
     UnusedSources,
     MissingPrimaryKey,
+    MissingSourceFreshness,
 }
 
 impl Selector {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
@@ -31,6 +32,7 @@ impl Selector {
         Selector::RootModels,
         Selector::UnusedSources,
         Selector::MissingPrimaryKey,
+        Selector::MissingSourceFreshness,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -46,6 +48,7 @@ impl Selector {
             Selector::RootModels => "root_models",
             Selector::UnusedSources => "unused_sources",
             Selector::MissingPrimaryKey => "missing_primary_key",
+            Selector::MissingSourceFreshness => "missing_source_freshness",
         }
     }
 }

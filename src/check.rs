@@ -91,6 +91,7 @@ pub struct SourceFailure {
     pub description_missing: bool,
     pub duplicate_id: Option<String>,
     pub is_unused_source: bool,
+    pub is_missing_source_freshness: bool,
 }
 
 impl Display for SourceFailure {
@@ -104,6 +105,9 @@ impl Display for SourceFailure {
         }
         if self.is_unused_source {
             writeln!(f, "  - Unused Source")?;
+        }
+        if self.is_missing_source_freshness {
+            writeln!(f, "  - Missing Source Freshness")?;
         }
         Ok(())
     }
@@ -450,13 +454,19 @@ fn check_source(
         .then(|| duplicate_source(manifest, source))
         .flatten();
     let is_unused_source = unused_source(manifest, source, config);
+    let is_missing_source_freshness = missing_source_freshness(source, config);
 
-    (description_missing || duplicate_id.is_some() || is_unused_source).then(|| SourceFailure {
-        source_id: source.__common_attr__.unique_id.clone(),
-        description_missing,
-        duplicate_id,
-        is_unused_source,
-    })
+    (description_missing
+        || duplicate_id.is_some()
+        || is_unused_source
+        || is_missing_source_freshness)
+        .then(|| SourceFailure {
+            source_id: source.__common_attr__.unique_id.clone(),
+            description_missing,
+            duplicate_id,
+            is_unused_source,
+            is_missing_source_freshness,
+        })
 }
 
 fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Option<String> {
@@ -487,6 +497,17 @@ fn unused_source(manifest: &DbtManifestV12, source: &ManifestSource, config: &Co
         .unwrap_or(&vec![])
         .is_empty()
 }
+
+fn missing_source_freshness(source: &ManifestSource, config: &Config) -> bool {
+    if !config.select.contains(&Selector::MissingSourceFreshness) {
+        return false;
+    }
+    if let Some(freshness) = &source.freshness {
+        return freshness.warn_after.is_none() && freshness.error_after.is_none();
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -714,5 +735,27 @@ mod tests {
 
         assert!(!unused_source(&manifest, &good_source, &config));
         assert!(unused_source(&manifest, &bad_source, &config));
+    }
+
+    #[test]
+    fn test_missing_source_freshness() {
+        use dbt_schemas::schemas::common::{FreshnessDefinition, FreshnessPeriod, FreshnessRules};
+
+        let mut source = ManifestSource::default();
+        // Missing Freshness
+        let mut fresh_def = FreshnessDefinition::default();
+        source.freshness = Some(fresh_def.clone());
+
+        let config = Config::default();
+
+        assert!(missing_source_freshness(&source, &config));
+
+        // Freshness with warn_after
+        fresh_def.warn_after = Some(FreshnessRules {
+            count: Some(1),
+            period: Some(FreshnessPeriod::day),
+        });
+        source.freshness = Some(fresh_def.clone());
+        assert!(!missing_source_freshness(&source, &config));
     }
 }
