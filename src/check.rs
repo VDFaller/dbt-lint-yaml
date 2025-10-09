@@ -612,9 +612,11 @@ mod tests {
                 .__base_attr__
                 .columns
                 .insert("customer_id".to_string(), {
-                    let mut column = DbtColumn::default();
-                    column.name = "customer_id".to_string();
-                    column.description = Some("Upstream description".to_string());
+                    let column = DbtColumn {
+                        name: "customer_id".to_string(),
+                        description: Some("Upstream description".to_string()),
+                        ..Default::default()
+                    };
                     Arc::new(column)
                 });
         }
@@ -626,9 +628,11 @@ mod tests {
                 .__base_attr__
                 .columns
                 .insert("customer_id".to_string(), {
-                    let mut column = DbtColumn::default();
-                    column.name = "customer_id".to_string();
-                    column.description = None;
+                    let column = DbtColumn {
+                        name: "customer_id".to_string(),
+                        description: None,
+                        ..Default::default()
+                    };
                     Arc::new(column)
                 });
         }
@@ -777,8 +781,10 @@ mod tests {
             _ => panic!("expected model node"),
         };
 
-        let mut config = Config::default();
-        config.required_tests = vec!["unique".to_string()];
+        let config = Config {
+            required_tests: vec!["unique".to_string()],
+            ..Default::default()
+        };
 
         assert!(missing_required_tests(&manifest, model, &config));
     }

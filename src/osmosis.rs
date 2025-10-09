@@ -125,16 +125,20 @@ mod tests {
     }
 
     fn column_with_description(name: &str, description: &str) -> Arc<DbtColumn> {
-        let mut column = DbtColumn::default();
-        column.name = name.to_string();
-        column.description = Some(description.to_string());
+        let column = DbtColumn {
+            name: name.to_string(),
+            description: Some(description.to_string()),
+            ..Default::default()
+        };
         Arc::new(column)
     }
 
     fn column_without_description(name: &str) -> Arc<DbtColumn> {
-        let mut column = DbtColumn::default();
-        column.name = name.to_string();
-        column.description = None;
+        let column = DbtColumn {
+            name: name.to_string(),
+            description: None,
+            ..Default::default()
+        };
         Arc::new(column)
     }
 
