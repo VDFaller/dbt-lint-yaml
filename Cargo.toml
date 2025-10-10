@@ -43,6 +43,7 @@ thiserror = "1.0"
 toml = "0.9.7"
 strsim = "0.11"
 struct-field-names-as-array = "0.3.0"
+strum = { version = "0.27.2", features = ["derive"] }
 
 [[bin]]
 name = "write-default-config"
