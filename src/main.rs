@@ -1,5 +1,9 @@
 use clap::Parser;
-use dbt_lint_yaml::{check_all, config::Config, writeback};
+use dbt_lint_yaml::{
+    check::{CheckEvent, ModelResult, SourceResult, check_all_with_report},
+    config::Config,
+    writeback,
+};
 
 use dbt_common::{CodeLocation, FsResult, cancellation::CancellationTokenSource};
 use dbt_jinja_utils::{
@@ -16,7 +20,7 @@ use dbt_schemas::{
     state::Macros,
 };
 use minijinja::{TypecheckingEventListener, machinery::Span};
-use std::{any::Any, collections::HashSet, path::Path, rc::Rc, sync::Arc};
+use std::{any::Any, collections::HashSet, ffi::OsString, path::Path, rc::Rc, sync::Arc};
 
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -38,6 +42,36 @@ fn maybe_handle_version_override() {
             std::process::exit(0);
         }
     }
+}
+
+fn extract_verbose_flag(args: Vec<OsString>) -> (Vec<OsString>, bool) {
+    let mut verbose = false;
+    let mut filtered = Vec::new();
+    let mut iter = args.into_iter();
+
+    if let Some(program) = iter.next() {
+        filtered.push(program);
+    }
+
+    let mut passthrough = false;
+    for arg in iter {
+        if passthrough {
+            filtered.push(arg);
+            continue;
+        }
+        if arg == "--" {
+            passthrough = true;
+            filtered.push(arg);
+            continue;
+        }
+        if arg == "--verbose" || arg == "-v" {
+            verbose = true;
+            continue;
+        }
+        filtered.push(arg);
+    }
+
+    (filtered, verbose)
 }
 
 #[derive(Default)]
@@ -76,11 +110,41 @@ impl TypecheckingEventListener for NullTypecheckingEventListener {
     fn on_lookup(&self, _span: &Span, _kind: &str, _name: &str, _segments: Vec<Span>) {}
 }
 
+fn report_event(event: CheckEvent<'_>, verbose: bool) {
+    match event {
+        CheckEvent::Model(ModelResult::Pass(success)) => {
+            if verbose {
+                println!("\x1b[32msuccess:\x1b[0m {} passed", success.model_id);
+            }
+        }
+        CheckEvent::Model(ModelResult::Fail(failure)) => {
+            println!("\x1b[31merror:\x1b[0m {} failed", failure.model_id);
+            for reason in failure.failure_reasons() {
+                println!("    * {reason}");
+            }
+        }
+        CheckEvent::Source(SourceResult::Pass(success)) => {
+            if verbose {
+                println!("\x1b[32msuccess:\x1b[0m {} passed", success.source_id);
+            }
+        }
+        CheckEvent::Source(SourceResult::Fail(failure)) => {
+            println!("\x1b[31merror:\x1b[0m {} failed", failure.source_id);
+            for reason in failure.failure_reasons() {
+                println!("    * {reason}");
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> FsResult<()> {
     maybe_handle_version_override();
 
-    let cli = Cli::parse();
+    let raw_args: Vec<OsString> = std::env::args_os().collect();
+    let (filtered_args, verbose) = extract_verbose_flag(raw_args);
+
+    let cli = Cli::parse_from(filtered_args);
     let system_args = from_main(&cli);
 
     let eval_args = cli.to_eval_args(system_args)?;
@@ -119,7 +183,9 @@ async fn main() -> FsResult<()> {
 
     let dbt_manifest = build_manifest(&invocation_id, &resolved_state);
 
-    let check_result = check_all(&dbt_manifest, &config);
+    let check_result = check_all_with_report(&dbt_manifest, &config, |event| {
+        report_event(event, verbose);
+    });
 
     for (model, model_changes) in check_result.model_changes.iter() {
         println!("Model: {model} has found changes");
@@ -152,8 +218,7 @@ async fn main() -> FsResult<()> {
         }
     }
 
-    if !check_result.failures.is_empty() {
-        println!("{}", check_result.failures);
+    if check_result.has_failures() {
         std::process::exit(1);
     }
 
