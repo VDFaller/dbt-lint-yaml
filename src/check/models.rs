@@ -2,8 +2,7 @@ use crate::{
     config::{Config, Selector},
     osmosis::get_upstream_col_desc,
 };
-use dbt_dag::deps_mgmt::topological_sort;
-use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel, ManifestSource};
+use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -105,7 +104,7 @@ pub enum ColumnResult {
 }
 
 impl ColumnResult {
-    fn change(&self) -> Option<&ColumnChanges> {
+    pub fn change(&self) -> Option<&ColumnChanges> {
         match self {
             ColumnResult::Pass(success) => success.change.as_ref(),
             ColumnResult::Fail(_) => None,
@@ -126,77 +125,6 @@ pub struct ColumnChanges {
     pub column_name: String,
     pub old_description: Option<String>,
     pub new_description: Option<String>,
-}
-
-#[derive(Default, Debug)]
-pub struct CheckResult {
-    pub models: BTreeMap<String, ModelResult>,
-    pub sources: BTreeMap<String, SourceResult>,
-    pub model_changes: BTreeMap<String, ModelChanges>,
-}
-
-impl CheckResult {
-    pub fn has_failures(&self) -> bool {
-        self.models.values().any(ModelResult::is_failure)
-            || self.sources.values().any(SourceResult::is_failure)
-    }
-
-    pub fn model_failures(&self) -> impl Iterator<Item = &ModelFailure> {
-        self.models.values().filter_map(ModelResult::as_failure)
-    }
-
-    pub fn source_failures(&self) -> impl Iterator<Item = &SourceFailure> {
-        self.sources.values().filter_map(SourceResult::as_failure)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum CheckEvent<'a> {
-    Model(&'a ModelResult),
-    Source(&'a SourceResult),
-}
-
-#[derive(Default, Debug)]
-pub struct SourceFailure {
-    pub source_id: String,
-    pub description_missing: bool,
-    pub duplicate_id: Option<String>,
-    pub is_unused_source: bool,
-    pub is_missing_source_freshness: bool,
-    pub is_missing_source_description: bool,
-}
-
-impl Display for SourceFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "SourceFailure: {}", self.source_id)?;
-        for reason in self.failure_reasons() {
-            writeln!(f, "  - {reason}")?;
-        }
-        Ok(())
-    }
-}
-
-impl SourceFailure {
-    pub fn failure_reasons(&self) -> Vec<String> {
-        let mut reasons = Vec::new();
-
-        self.description_missing
-            .then(|| reasons.push("Missing Description".to_string()));
-        self.duplicate_id.is_some().then(|| {
-            reasons.push(format!(
-                "Duplicate Source Definition: {}",
-                self.duplicate_id.as_ref().unwrap()
-            ))
-        });
-        self.is_unused_source
-            .then(|| reasons.push("Unused Source".to_string()));
-        self.is_missing_source_freshness
-            .then(|| reasons.push("Missing Source Freshness".to_string()));
-        self.is_missing_source_description
-            .then(|| reasons.push("Missing Source Description".to_string()));
-
-        reasons
-    }
 }
 
 #[derive(Default, Debug)]
@@ -240,107 +168,7 @@ impl ModelResult {
     }
 }
 
-#[derive(Default, Debug)]
-pub struct SourceSuccess {
-    pub source_id: String,
-}
-
-#[derive(Debug)]
-pub enum SourceResult {
-    Pass(SourceSuccess),
-    Fail(SourceFailure),
-}
-
-impl SourceResult {
-    pub fn source_id(&self) -> &str {
-        match self {
-            SourceResult::Pass(success) => &success.source_id,
-            SourceResult::Fail(failure) => &failure.source_id,
-        }
-    }
-
-    pub fn as_failure(&self) -> Option<&SourceFailure> {
-        if let SourceResult::Fail(failure) = self {
-            Some(failure)
-        } else {
-            None
-        }
-    }
-
-    pub fn is_failure(&self) -> bool {
-        matches!(self, SourceResult::Fail(_))
-    }
-}
-
-// TODO: This should just be the full DAG, not just models
-fn models_in_dag_order(manifest: &DbtManifestV12) -> Vec<String> {
-    let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-
-    for (node_id, node) in &manifest.nodes {
-        if let DbtNode::Model(model) = node {
-            let upstream_models = model
-                .__base_attr__
-                .depends_on
-                .nodes
-                .iter()
-                .filter(|upstream_id| {
-                    matches!(manifest.nodes.get(*upstream_id), Some(DbtNode::Model(_)))
-                })
-                .cloned()
-                .collect::<BTreeSet<_>>();
-
-            deps.insert(node_id.clone(), upstream_models);
-        }
-    }
-
-    topological_sort(&deps)
-}
-
-pub fn check_all(manifest: &DbtManifestV12, config: &Config) -> CheckResult {
-    check_all_with_report(manifest, config, |_| {})
-}
-
-pub fn check_all_with_report<F>(
-    manifest: &DbtManifestV12,
-    config: &Config,
-    mut reporter: F,
-) -> CheckResult
-where
-    F: FnMut(CheckEvent<'_>),
-{
-    let mut result = CheckResult::default();
-    let mut accumulated_changes: BTreeMap<String, ModelChanges> = BTreeMap::new();
-    let sorted_nodes = models_in_dag_order(manifest);
-
-    for model_id in sorted_nodes {
-        let model_result = check_model(manifest, &model_id, &accumulated_changes, config);
-
-        if let Some(changes) = model_result.changes() {
-            accumulated_changes.insert(changes.model_id.clone(), changes.clone());
-            result
-                .model_changes
-                .insert(changes.model_id.clone(), changes.clone());
-        }
-
-        reporter(CheckEvent::Model(&model_result));
-
-        let model_key = model_result.model_id().to_string();
-        result.models.insert(model_key, model_result);
-    }
-
-    for source in manifest.sources.values() {
-        let source_result = check_source(manifest, source, config);
-
-        reporter(CheckEvent::Source(&source_result));
-
-        let source_key = source_result.source_id().to_string();
-        result.sources.insert(source_key, source_result);
-    }
-
-    result
-}
-
-fn check_model(
+pub(crate) fn check_model(
     manifest: &DbtManifestV12,
     model_id: &str,
     prior_changes: &BTreeMap<String, ModelChanges>,
@@ -470,6 +298,7 @@ fn missing_properties_file(node: &DbtNode) -> bool {
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
+/// snapshots are not counted in fanout
 fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> bool {
     if !config.select.contains(&Selector::ModelFanout) {
         return false;
@@ -652,97 +481,11 @@ fn check_model_columns(
     results
 }
 
-fn check_source(
-    manifest: &DbtManifestV12,
-    source: &ManifestSource,
-    config: &Config,
-) -> SourceResult {
-    let source_id = source.__common_attr__.unique_id.clone();
-    let description_missing = config
-        .select
-        .contains(&Selector::MissingSourceTableDescriptions)
-        && source.__common_attr__.description.is_none();
-    let duplicate_id = config
-        .select
-        .contains(&Selector::DuplicateSources)
-        .then(|| duplicate_source(manifest, source))
-        .flatten();
-    let is_unused_source = unused_source(manifest, source, config);
-    let is_missing_source_freshness = missing_source_freshness(source, config);
-    let is_missing_source_description = missing_source_description(source, config);
-
-    if description_missing
-        || duplicate_id.is_some()
-        || is_unused_source
-        || is_missing_source_freshness
-        || is_missing_source_description
-    {
-        SourceResult::Fail(SourceFailure {
-            source_id,
-            description_missing,
-            duplicate_id,
-            is_unused_source,
-            is_missing_source_freshness,
-            is_missing_source_description,
-        })
-    } else {
-        SourceResult::Pass(SourceSuccess { source_id })
-    }
-}
-
-/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/documentation/#undocumented-sources
-fn missing_source_description(source: &ManifestSource, config: &Config) -> bool {
-    if !config.select.contains(&Selector::MissingSourceDescriptions) {
-        return false;
-    }
-    source.source_description.is_empty()
-}
-
-/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#duplicate-sources
-fn duplicate_source(manifest: &DbtManifestV12, source: &ManifestSource) -> Option<String> {
-    if source.__common_attr__.name == source.identifier {
-        return None;
-    }
-    // TODO: look into performance of this search in a larger project
-    manifest
-        .sources
-        .values()
-        .find(|s| {
-            // there technically could be more than one dupe, but do I care?
-            s.identifier == source.identifier
-                && s.source_name == source.source_name
-                && s.__common_attr__.unique_id != source.__common_attr__.unique_id
-        })
-        .map(|s| s.__common_attr__.unique_id.clone())
-}
-
-/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#unused-sources
-fn unused_source(manifest: &DbtManifestV12, source: &ManifestSource, config: &Config) -> bool {
-    // A source is considered "used" if any model depends on it
-    if !config.select.contains(&Selector::UnusedSources) {
-        return false;
-    }
-    manifest
-        .child_map
-        .get(&source.__common_attr__.unique_id)
-        .unwrap_or(&vec![])
-        .is_empty()
-}
-
-/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-source-freshness
-fn missing_source_freshness(source: &ManifestSource, config: &Config) -> bool {
-    if !config.select.contains(&Selector::MissingSourceFreshness) {
-        return false;
-    }
-    if let Some(freshness) = &source.freshness {
-        return freshness.warn_after.is_none() && freshness.error_after.is_none();
-    }
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use dbt_schemas::schemas::manifest::ManifestModel;
     use dbt_schemas::schemas::{dbt_column::DbtColumn, manifest::DbtNode};
     use std::sync::Arc;
 
@@ -795,7 +538,7 @@ mod tests {
     #[test]
     fn check_model_returns_column_changes() {
         let manifest = manifest_with_inheritable_column();
-        let prior_changes = std::collections::BTreeMap::<String, ModelChanges>::new();
+        let prior_changes = BTreeMap::<String, ModelChanges>::new();
 
         let model_result = check_model(
             &manifest,
@@ -850,19 +593,30 @@ mod tests {
     }
 
     #[test]
-    fn check_all_collects_model_changes() {
-        let manifest = manifest_with_inheritable_column();
+    fn missing_required_tests_returns_true_when_no_children_present() {
+        let mut manifest = DbtManifestV12::default();
+        let model_id = "model.test.without_children".to_string();
+        manifest
+            .nodes
+            .insert(model_id.clone(), DbtNode::Model(Default::default()));
 
-        let result = check_all(&manifest, &Config::default());
+        if let Some(DbtNode::Model(model)) = manifest.nodes.get_mut(&model_id) {
+            model.__common_attr__.unique_id = model_id.clone();
+        } else {
+            panic!("expected model to be inserted");
+        }
 
-        assert_eq!(result.model_changes.len(), 1);
-        assert!(result.model_changes.contains_key("model.test.downstream"));
-        let failure = result
-            .models
-            .get("model.test.downstream")
-            .and_then(ModelResult::as_failure)
-            .expect("model failure should be tracked");
-        assert!(failure.description_missing);
+        let model = match manifest.nodes.get(&model_id) {
+            Some(DbtNode::Model(model)) => model,
+            _ => panic!("expected model node"),
+        };
+
+        let config = Config {
+            required_tests: vec!["unique".to_string()],
+            ..Default::default()
+        };
+
+        assert!(missing_required_tests(&manifest, model, &config));
     }
 
     #[test]
@@ -944,33 +698,6 @@ mod tests {
     }
 
     #[test]
-    fn missing_required_tests_returns_true_when_no_children_present() {
-        let mut manifest = DbtManifestV12::default();
-        let model_id = "model.test.without_children".to_string();
-        manifest
-            .nodes
-            .insert(model_id.clone(), DbtNode::Model(Default::default()));
-
-        if let Some(DbtNode::Model(model)) = manifest.nodes.get_mut(&model_id) {
-            model.__common_attr__.unique_id = model_id.clone();
-        } else {
-            panic!("expected model to be inserted");
-        }
-
-        let model = match manifest.nodes.get(&model_id) {
-            Some(DbtNode::Model(model)) => model,
-            _ => panic!("expected model node"),
-        };
-
-        let config = Config {
-            required_tests: vec!["unique".to_string()],
-            ..Default::default()
-        };
-
-        assert!(missing_required_tests(&manifest, model, &config));
-    }
-
-    #[test]
     fn test_root_model() {
         let manifest = manifest_with_inheritable_column();
         let model_id = "model.test.upstream";
@@ -980,67 +707,6 @@ mod tests {
         };
         let config = Config::default();
         assert!(root_model(model, &config));
-    }
-
-    #[test]
-    fn test_unused_source() {
-        let mut manifest = DbtManifestV12::default();
-        let bad_source_id = "source.test.raw_layer.orders".to_string();
-        let mut bad_source = ManifestSource::default();
-        bad_source.__common_attr__.unique_id = bad_source_id.clone();
-        manifest.child_map.insert(bad_source_id.clone(), vec![]);
-        manifest
-            .sources
-            .insert(bad_source_id.clone(), bad_source.clone());
-
-        let good_source_id = "source.test.raw_layer.customers".to_string();
-        let mut good_source = ManifestSource::default();
-        good_source.__common_attr__.unique_id = good_source_id.clone();
-        manifest
-            .sources
-            .insert(good_source_id.clone(), good_source.clone());
-        manifest
-            .child_map
-            .insert(good_source_id.clone(), vec!["model.test.model".to_string()]);
-
-        let config = Config::default();
-
-        assert!(
-            !unused_source(&manifest, &good_source, &config),
-            "used source should not trigger"
-        );
-        assert!(
-            unused_source(&manifest, &bad_source, &config),
-            "unused source should trigger"
-        );
-    }
-
-    #[test]
-    fn test_missing_source_freshness() {
-        use dbt_schemas::schemas::common::{FreshnessDefinition, FreshnessPeriod, FreshnessRules};
-
-        let mut source = ManifestSource::default();
-        // Missing Freshness
-        let mut fresh_def = FreshnessDefinition::default();
-        source.freshness = Some(fresh_def.clone());
-
-        let config = Config::default();
-
-        assert!(
-            missing_source_freshness(&source, &config),
-            "missing freshness should trigger"
-        );
-
-        // Freshness with warn_after
-        fresh_def.warn_after = Some(FreshnessRules {
-            count: Some(1),
-            period: Some(FreshnessPeriod::day),
-        });
-        source.freshness = Some(fresh_def.clone());
-        assert!(
-            !missing_source_freshness(&source, &config),
-            "warn_after should satisfy freshness"
-        );
     }
 
     #[test]
@@ -1100,5 +766,22 @@ mod tests {
         assert!(rejoining_of_upstream_concepts(
             &manifest, downstream, &config
         ));
+    }
+
+    #[test]
+    fn test_missing_primary_key() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.test".to_string();
+        model.primary_key = Some(vec![]);
+        let config = Config::default();
+        assert!(missing_primary_key(&model, &config));
+    }
+
+    #[test]
+    fn test_missing_properties_file_for_model() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.patch_path = None;
+        let node = DbtNode::Model(model);
+        assert!(missing_properties_file(&node));
     }
 }
