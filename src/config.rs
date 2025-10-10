@@ -26,6 +26,8 @@ pub enum Selector {
     MultipleSourcesJoined,
     RejoiningOfUpstreamConcepts,
     SourceFanout,
+    PublicModelsWithoutContract,
+    ModelsSeparateFromPropertiesFile,
 }
 
 #[derive(Debug, Error)]

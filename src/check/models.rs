@@ -20,6 +20,8 @@ pub struct ModelFailure {
     pub is_missing_primary_key: bool,
     pub is_multiple_sources_joined: bool,
     pub is_rejoining_of_upstream_concepts: bool,
+    pub is_public_model_without_contract: bool,
+    pub is_model_separate_from_properties_file: bool, // I don't think I like the name
     pub column_results: BTreeMap<String, ColumnResult>,
     pub changes: Option<ModelChanges>,
 }
@@ -58,6 +60,10 @@ impl ModelFailure {
             .then(|| reasons.push("Joins multiple sources".to_string()));
         self.is_rejoining_of_upstream_concepts
             .then(|| reasons.push("Rejoining of upstream concepts".to_string()));
+        self.is_public_model_without_contract
+            .then(|| reasons.push("Public model without contract".to_string()));
+        self.is_model_separate_from_properties_file
+            .then(|| reasons.push("Model separate from properties file".to_string()));
 
         for column_result in self.column_results.values() {
             if let ColumnResult::Fail(column_failure) = column_result {
@@ -184,6 +190,8 @@ pub(crate) fn check_model(
 
     let model_unique_id = model_meta.__common_attr__.unique_id.clone();
     let patch_path = model_meta.__common_attr__.patch_path.clone();
+    let _model_type = model_type(model_meta); // currently unused
+
     let description_missing = config.select.contains(&Selector::MissingModelDescriptions)
         && model_meta.__common_attr__.description.is_none();
     let tags_missing =
@@ -200,6 +208,8 @@ pub(crate) fn check_model(
     let is_multiple_sources_joined = multiple_sources_joined(model_meta, config);
     let is_rejoining_of_upstream_concepts =
         rejoining_of_upstream_concepts(manifest, model_meta, config);
+    let is_public_model_without_contract = public_model_without_contract(model_meta, config);
+    let is_model_separate_from_properties_file = node_separate_from_properties_file(node);
 
     let column_results = check_model_columns(manifest, model_id, prior_changes, config);
     let has_column_failures = column_results
@@ -237,6 +247,8 @@ pub(crate) fn check_model(
         || is_missing_primary_key
         || is_multiple_sources_joined
         || is_rejoining_of_upstream_concepts
+        || is_public_model_without_contract
+        || is_model_separate_from_properties_file
     {
         ModelResult::Fail(ModelFailure {
             model_id: model_unique_id,
@@ -250,6 +262,8 @@ pub(crate) fn check_model(
             is_missing_primary_key,
             is_multiple_sources_joined,
             is_rejoining_of_upstream_concepts,
+            is_public_model_without_contract,
+            is_model_separate_from_properties_file,
             column_results,
             changes,
         })
@@ -331,6 +345,26 @@ fn missing_primary_key(model: &ManifestModel, config: &Config) -> bool {
     model.primary_key.as_ref().unwrap_or(&vec![]).is_empty()
 }
 
+fn node_separate_from_properties_file(node: &DbtNode) -> bool {
+    let patch_path = match node {
+        DbtNode::Model(model) => model.__common_attr__.patch_path.as_ref(),
+        DbtNode::Seed(seed) => seed.__common_attr__.patch_path.as_ref(),
+        DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.as_ref(),
+        _ => return false,
+    };
+    let Some(patch_path) = patch_path else {
+        return false;
+    };
+
+    let original_path = match node {
+        DbtNode::Model(model) => &model.__common_attr__.original_file_path,
+        DbtNode::Seed(seed) => &seed.__common_attr__.original_file_path,
+        DbtNode::Snapshot(snap) => &snap.__common_attr__.original_file_path,
+        _ => return false, // redundant
+    };
+    patch_path.parent() != original_path.parent()
+}
+
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#rejoining-of-upstream-concepts
 fn rejoining_of_upstream_concepts(
     manifest: &DbtManifestV12,
@@ -358,6 +392,16 @@ fn rejoining_of_upstream_concepts(
     }
 
     false
+}
+
+fn public_model_without_contract(model: &ManifestModel, config: &Config) -> bool {
+    if !config
+        .select
+        .contains(&Selector::PublicModelsWithoutContract)
+    {
+        return false;
+    }
+    is_public_model(model) && !model.__base_attr__.contract.enforced
 }
 
 fn missing_required_tests(
@@ -479,6 +523,26 @@ fn check_model_columns(
     }
 
     results
+}
+
+// helper functions
+fn is_public_model(model: &ManifestModel) -> bool {
+    model.config.access == Some(dbt_schemas::schemas::common::Access::Public)
+}
+
+fn model_type(model: &ManifestModel) -> &str {
+    // crude heuristic based on file path
+    // TODO: make this configurable or at least more robust
+    let ofp = &model.__common_attr__.original_file_path;
+    if ofp.starts_with("models/staging/") {
+        "staging"
+    } else if ofp.starts_with("models/marts/") {
+        "mart"
+    } else if ofp.starts_with("models/intermediate/") {
+        "intermediate"
+    } else {
+        "other"
+    }
 }
 
 #[cfg(test)]
@@ -783,5 +847,18 @@ mod tests {
         model.__common_attr__.patch_path = None;
         let node = DbtNode::Model(model);
         assert!(missing_properties_file(&node));
+    }
+
+    #[test]
+    fn test_public_model_without_contract() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.test".to_string();
+        model.config.access = Some(dbt_schemas::schemas::common::Access::Public);
+        model.__base_attr__.contract.enforced = false;
+        let config = Config {
+            select: vec![Selector::PublicModelsWithoutContract],
+            ..Default::default()
+        };
+        assert!(public_model_without_contract(&model, &config));
     }
 }
