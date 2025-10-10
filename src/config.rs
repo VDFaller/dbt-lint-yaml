@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
 use strsim::levenshtein;
 use struct_field_names_as_array::FieldNamesAsSlice;
+use strum::{AsRefStr, EnumIter, IntoEnumIterator};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, EnumIter, AsRefStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum Selector {
     MissingColumnDescriptions,
     MissingModelDescriptions,
@@ -22,48 +26,6 @@ pub enum Selector {
     MultipleSourcesJoined,
     RejoiningOfUpstreamConcepts,
     SourceFanout,
-}
-
-impl Selector {
-    pub const ALL: [Self; 16] = [
-        Selector::MissingColumnDescriptions,
-        Selector::MissingModelDescriptions,
-        Selector::MissingModelTags,
-        Selector::MissingSourceDescriptions,
-        Selector::MissingSourceTableDescriptions,
-        Selector::DirectJoinToSource,
-        Selector::MissingPropertiesFile,
-        Selector::DuplicateSources,
-        Selector::ModelFanout,
-        Selector::RootModels,
-        Selector::UnusedSources,
-        Selector::MissingPrimaryKey,
-        Selector::MissingSourceFreshness,
-        Selector::MultipleSourcesJoined,
-        Selector::RejoiningOfUpstreamConcepts,
-        Selector::SourceFanout,
-    ];
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Selector::MissingColumnDescriptions => "missing_column_descriptions",
-            Selector::MissingModelDescriptions => "missing_model_descriptions",
-            Selector::MissingModelTags => "missing_model_tags",
-            Selector::MissingSourceDescriptions => "missing_source_descriptions",
-            Selector::MissingSourceTableDescriptions => "missing_source_table_descriptions",
-            Selector::DirectJoinToSource => "direct_join_to_source",
-            Selector::MissingPropertiesFile => "missing_properties_file",
-            Selector::DuplicateSources => "duplicate_sources",
-            Selector::ModelFanout => "model_fanout",
-            Selector::RootModels => "root_models",
-            Selector::UnusedSources => "unused_sources",
-            Selector::MissingPrimaryKey => "missing_primary_key",
-            Selector::MissingSourceFreshness => "missing_source_freshness",
-            Selector::MultipleSourcesJoined => "multiple_sources_joined",
-            Selector::RejoiningOfUpstreamConcepts => "rejoining_of_upstream_concepts",
-            Selector::SourceFanout => "source_fanout",
-        }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -141,7 +103,7 @@ impl Config {
 }
 
 fn default_select() -> Vec<Selector> {
-    Selector::ALL.to_vec()
+    Selector::iter().collect()
 }
 
 fn default_pull_column_desc_from_upstream() -> bool {
@@ -190,6 +152,7 @@ fn find_suggestion(unknown: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strum::IntoEnumIterator;
 
     #[test]
     fn test_default_config() {
@@ -243,8 +206,8 @@ mod tests {
         "#;
         let err = toml::from_str::<Config>(toml_str).expect_err("invalid selector should error");
         let message = err.to_string();
-        for variant in Selector::ALL {
-            let expected = variant.as_str();
+        for variant in Selector::iter() {
+            let expected = variant.as_ref();
             assert!(
                 message.contains(expected),
                 "error should mention {expected}, got: {message}"

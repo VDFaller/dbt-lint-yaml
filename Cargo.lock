@@ -1500,6 +1500,7 @@ dependencies = [
  "serde_json",
  "strsim",
  "struct-field-names-as-array",
+ "strum",
  "thiserror 1.0.69",
  "tokio",
  "toml",
