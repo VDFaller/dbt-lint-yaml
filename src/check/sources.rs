@@ -10,6 +10,7 @@ pub struct SourceFailure {
     pub is_unused_source: bool,
     pub is_missing_source_freshness: bool,
     pub is_missing_source_description: bool,
+    pub is_source_fanout: bool,
 }
 
 impl Display for SourceFailure {
@@ -37,7 +38,8 @@ impl SourceFailure {
             .then(|| reasons.push("Missing Source Freshness".to_string()));
         self.is_missing_source_description
             .then(|| reasons.push("Missing Source Description".to_string()));
-
+        self.is_source_fanout
+            .then(|| reasons.push("Source Fanout".to_string()));
         reasons
     }
 }
@@ -92,12 +94,14 @@ pub(crate) fn check_source(
     let is_unused_source = unused_source(manifest, source, config);
     let is_missing_source_freshness = missing_source_freshness(source, config);
     let is_missing_source_description = missing_source_description(source, config);
+    let is_source_fanout = source_fanout(manifest, source, config);
 
     if description_missing
         || duplicate_id.is_some()
         || is_unused_source
         || is_missing_source_freshness
         || is_missing_source_description
+        || is_source_fanout
     {
         SourceResult::Fail(SourceFailure {
             source_id,
@@ -106,6 +110,7 @@ pub(crate) fn check_source(
             is_unused_source,
             is_missing_source_freshness,
             is_missing_source_description,
+            is_source_fanout,
         })
     } else {
         SourceResult::Pass(SourceSuccess { source_id })
@@ -118,6 +123,20 @@ fn missing_source_description(source: &ManifestSource, config: &Config) -> bool 
         return false;
     }
     source.source_description.is_empty()
+}
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#source-fanout
+fn source_fanout(manifest: &DbtManifestV12, source: &ManifestSource, config: &Config) -> bool {
+    if !config.select.contains(&Selector::SourceFanout) {
+        return false;
+    }
+
+    manifest
+        .child_map
+        .get(&source.__common_attr__.unique_id)
+        .map(|children| children.len())
+        .unwrap_or(0)
+        > 1
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#duplicate-sources
@@ -163,6 +182,8 @@ fn missing_source_freshness(source: &ManifestSource, config: &Config) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::config::Config;
     use dbt_schemas::schemas::common::{FreshnessDefinition, FreshnessPeriod, FreshnessRules};
@@ -177,6 +198,7 @@ mod tests {
             is_unused_source: true,
             is_missing_source_freshness: true,
             is_missing_source_description: true,
+            is_source_fanout: false,
         };
 
         let reasons = failure.failure_reasons();
@@ -288,5 +310,29 @@ mod tests {
         let config = Config::default();
         let result = check_source(&manifest, &source, &config);
         assert!(result.is_failure());
+    }
+
+    #[test]
+    fn test_source_fanout() {
+        let mut child_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        child_map.insert(
+            "source.raw.orders".to_string(),
+            vec![
+                "model.test.orders".to_string(),
+                "model.test.orders_summary".to_string(),
+            ],
+        );
+        let mut sources: BTreeMap<String, ManifestSource> = BTreeMap::new();
+        let mut source = ManifestSource::default();
+        source.__common_attr__.unique_id = "source.raw.orders".to_string();
+        sources.insert(source.__common_attr__.unique_id.clone(), source.clone());
+        let manifest = DbtManifestV12 {
+            child_map,
+            sources,
+            ..Default::default()
+        };
+        let source = manifest.sources.get("source.raw.orders").unwrap();
+        let config = Config::default();
+        assert!(source_fanout(&manifest, source, &config));
     }
 }

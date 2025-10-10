@@ -21,10 +21,11 @@ pub enum Selector {
     MissingSourceFreshness,
     MultipleSourcesJoined,
     RejoiningOfUpstreamConcepts,
+    SourceFanout,
 }
 
 impl Selector {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Selector::MissingColumnDescriptions,
         Selector::MissingModelDescriptions,
         Selector::MissingModelTags,
@@ -40,6 +41,7 @@ impl Selector {
         Selector::MissingSourceFreshness,
         Selector::MultipleSourcesJoined,
         Selector::RejoiningOfUpstreamConcepts,
+        Selector::SourceFanout,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -59,6 +61,7 @@ impl Selector {
             Selector::MissingSourceFreshness => "missing_source_freshness",
             Selector::MultipleSourcesJoined => "multiple_sources_joined",
             Selector::RejoiningOfUpstreamConcepts => "rejoining_of_upstream_concepts",
+            Selector::SourceFanout => "source_fanout",
         }
     }
 }
@@ -166,7 +169,10 @@ fn validate_keys(table: &toml::value::Table) -> Result<(), ConfigError> {
     if unknown_messages.is_empty() {
         Ok(())
     } else {
-        unknown_messages.push(format!("Supported keys: {}", Config::FIELD_NAMES_AS_SLICE.join(", ")));
+        unknown_messages.push(format!(
+            "Supported keys: {}",
+            Config::FIELD_NAMES_AS_SLICE.join(", ")
+        ));
         Err(ConfigError::UnknownKeys(unknown_messages.join("\n")))
     }
 }
