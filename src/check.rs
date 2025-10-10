@@ -13,7 +13,6 @@ pub struct ModelFailure {
     pub model_id: String,
     pub description_missing: bool,
     pub tags_missing: bool,
-    pub column_failures: BTreeMap<String, ColumnFailure>,
     pub is_direct_join_to_source: bool,
     pub is_missing_properties_file: bool,
     pub is_model_fanout: bool,
@@ -22,42 +21,52 @@ pub struct ModelFailure {
     pub is_missing_primary_key: bool,
     pub is_multiple_sources_joined: bool,
     pub is_rejoining_of_upstream_concepts: bool,
+    pub column_results: BTreeMap<String, ColumnResult>,
+    pub changes: Option<ModelChanges>,
 }
 
 impl Display for ModelFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "ModelFailure: {}", self.model_id)?;
-        if self.description_missing {
-            writeln!(f, "  - Missing Description")?;
-        }
-        if self.tags_missing {
-            writeln!(f, "  - Missing Tags")?;
-        }
-        if self.is_direct_join_to_source {
-            writeln!(f, "  - Direct join to source detected")?;
-        }
-        if self.is_missing_properties_file {
-            writeln!(f, "  - Missing properties file")?;
-        }
-        if self.is_model_fanout {
-            writeln!(f, "  - Model fanout exceeds threshold")?;
-        }
-        if self.is_missing_required_tests {
-            writeln!(f, "  - Missing required tests")?;
-        }
-        if self.is_root_model {
-            writeln!(f, "  - Root model (no dependencies)")?;
-        }
-        for column_failure in self.column_failures.values() {
-            write!(f, "{column_failure}")?;
-        }
-        if self.is_missing_primary_key {
-            writeln!(f, "  - Missing Primary Key")?;
-        }
-        if self.is_multiple_sources_joined {
-            writeln!(f, "  - Joins multiple sources")?;
+        for reason in self.failure_reasons() {
+            writeln!(f, "  - {reason}")?;
         }
         Ok(())
+    }
+}
+
+impl ModelFailure {
+    pub fn failure_reasons(&self) -> Vec<String> {
+        let mut reasons = Vec::new();
+
+        self.description_missing
+            .then(|| reasons.push("Missing Description".to_string()));
+        self.tags_missing
+            .then(|| reasons.push("Missing Tags".to_string()));
+        self.is_direct_join_to_source
+            .then(|| reasons.push("Direct join to source detected".to_string()));
+        self.is_missing_properties_file
+            .then(|| reasons.push("Missing properties file".to_string()));
+        self.is_model_fanout
+            .then(|| reasons.push("Model fanout exceeds threshold".to_string()));
+        self.is_missing_required_tests
+            .then(|| reasons.push("Missing required tests".to_string()));
+        self.is_root_model
+            .then(|| reasons.push("Root model (no dependencies)".to_string()));
+        self.is_missing_primary_key
+            .then(|| reasons.push("Missing Primary Key".to_string()));
+        self.is_multiple_sources_joined
+            .then(|| reasons.push("Joins multiple sources".to_string()));
+        self.is_rejoining_of_upstream_concepts
+            .then(|| reasons.push("Rejoining of upstream concepts".to_string()));
+
+        for column_result in self.column_results.values() {
+            if let ColumnResult::Fail(column_failure) = column_result {
+                reasons.push(column_failure.summary());
+            }
+        }
+
+        reasons
     }
 }
 
@@ -69,25 +78,82 @@ pub struct ColumnFailure {
 
 impl Display for ColumnFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "  ColumnFailure: {}", self.column_name)?;
-        if self.description_missing {
-            writeln!(f, "    - Missing Description")?;
-        }
-        Ok(())
+        writeln!(f, "  - {}", self.summary())
     }
 }
+
+impl ColumnFailure {
+    pub fn summary(&self) -> String {
+        if self.description_missing {
+            format!("Column `{}`: Missing Description", self.column_name)
+        } else {
+            format!("Column `{}`: Validation failed", self.column_name)
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct ColumnSuccess {
+    pub column_name: String,
+    pub change: Option<ColumnChanges>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ColumnResult {
+    Pass(ColumnSuccess),
+    Fail(ColumnFailure),
+}
+
+impl ColumnResult {
+    fn change(&self) -> Option<&ColumnChanges> {
+        match self {
+            ColumnResult::Pass(success) => success.change.as_ref(),
+            ColumnResult::Fail(_) => None,
+        }
+    }
+}
+
 // TODO: Change ModelChanges to pull from an enum of possible changes
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct ModelChanges {
     pub model_id: String,
     pub patch_path: Option<PathBuf>,
     pub column_changes: BTreeMap<String, BTreeSet<ColumnChanges>>,
 }
+
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ColumnChanges {
     pub column_name: String,
     pub old_description: Option<String>,
     pub new_description: Option<String>,
+}
+
+#[derive(Default, Debug)]
+pub struct CheckResult {
+    pub models: BTreeMap<String, ModelResult>,
+    pub sources: BTreeMap<String, SourceResult>,
+    pub model_changes: BTreeMap<String, ModelChanges>,
+}
+
+impl CheckResult {
+    pub fn has_failures(&self) -> bool {
+        self.models.values().any(ModelResult::is_failure)
+            || self.sources.values().any(SourceResult::is_failure)
+    }
+
+    pub fn model_failures(&self) -> impl Iterator<Item = &ModelFailure> {
+        self.models.values().filter_map(ModelResult::as_failure)
+    }
+
+    pub fn source_failures(&self) -> impl Iterator<Item = &SourceFailure> {
+        self.sources.values().filter_map(SourceResult::as_failure)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CheckEvent<'a> {
+    Model(&'a ModelResult),
+    Source(&'a SourceResult),
 }
 
 #[derive(Default, Debug)]
@@ -103,60 +169,107 @@ pub struct SourceFailure {
 impl Display for SourceFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "SourceFailure: {}", self.source_id)?;
-        if self.description_missing {
-            writeln!(f, "  - Missing Description")?;
-        }
-        if let Some(duplicate_id) = &self.duplicate_id {
-            writeln!(f, "  - Duplicate Source Definition: {duplicate_id}")?;
-        }
-        if self.is_unused_source {
-            writeln!(f, "  - Unused Source")?;
-        }
-        if self.is_missing_source_freshness {
-            writeln!(f, "  - Missing Source Freshness")?;
-        }
-        if self.is_missing_source_description {
-            writeln!(f, "  - Missing Source Description")?;
+        for reason in self.failure_reasons() {
+            writeln!(f, "  - {reason}")?;
         }
         Ok(())
     }
 }
 
-#[derive(Default, Debug)]
-pub struct Failures {
-    pub models: BTreeMap<String, ModelFailure>,
-    pub sources: BTreeMap<String, SourceFailure>,
-}
+impl SourceFailure {
+    pub fn failure_reasons(&self) -> Vec<String> {
+        let mut reasons = Vec::new();
 
-impl Display for Failures {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Failures:")?;
-        for model_failure in self.models.values() {
-            write!(f, "{model_failure}")?;
-        }
-        for source_failure in self.sources.values() {
-            write!(f, "{source_failure}")?;
-        }
-        Ok(())
+        self.description_missing
+            .then(|| reasons.push("Missing Description".to_string()));
+        self.duplicate_id.is_some().then(|| {
+            reasons.push(format!(
+                "Duplicate Source Definition: {}",
+                self.duplicate_id.as_ref().unwrap()
+            ))
+        });
+        self.is_unused_source
+            .then(|| reasons.push("Unused Source".to_string()));
+        self.is_missing_source_freshness
+            .then(|| reasons.push("Missing Source Freshness".to_string()));
+        self.is_missing_source_description
+            .then(|| reasons.push("Missing Source Description".to_string()));
+
+        reasons
     }
 }
 
-impl Failures {
-    pub fn is_empty(&self) -> bool {
-        self.models.is_empty() && self.sources.is_empty()
+#[derive(Default, Debug)]
+pub struct ModelSuccess {
+    pub model_id: String,
+    pub column_results: BTreeMap<String, ColumnResult>,
+    pub changes: Option<ModelChanges>,
+}
+
+#[derive(Debug)]
+pub enum ModelResult {
+    Pass(ModelSuccess),
+    Fail(ModelFailure),
+}
+
+impl ModelResult {
+    pub fn model_id(&self) -> &str {
+        match self {
+            ModelResult::Pass(success) => &success.model_id,
+            ModelResult::Fail(failure) => &failure.model_id,
+        }
+    }
+
+    pub fn changes(&self) -> Option<&ModelChanges> {
+        match self {
+            ModelResult::Pass(success) => success.changes.as_ref(),
+            ModelResult::Fail(failure) => failure.changes.as_ref(),
+        }
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(self, ModelResult::Fail(_))
+    }
+
+    pub fn as_failure(&self) -> Option<&ModelFailure> {
+        if let ModelResult::Fail(failure) = self {
+            Some(failure)
+        } else {
+            None
+        }
     }
 }
 
 #[derive(Default, Debug)]
-pub struct CheckResult {
-    pub failures: Failures,
-    pub model_changes: BTreeMap<String, ModelChanges>,
+pub struct SourceSuccess {
+    pub source_id: String,
 }
 
-#[derive(Default, Debug)]
-struct ColumnCheckResult {
-    failures: BTreeMap<String, ColumnFailure>,
-    column_changes: BTreeMap<String, BTreeSet<ColumnChanges>>,
+#[derive(Debug)]
+pub enum SourceResult {
+    Pass(SourceSuccess),
+    Fail(SourceFailure),
+}
+
+impl SourceResult {
+    pub fn source_id(&self) -> &str {
+        match self {
+            SourceResult::Pass(success) => &success.source_id,
+            SourceResult::Fail(failure) => &failure.source_id,
+        }
+    }
+
+    pub fn as_failure(&self) -> Option<&SourceFailure> {
+        if let SourceResult::Fail(failure) = self {
+            Some(failure)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(self, SourceResult::Fail(_))
+    }
 }
 
 // TODO: This should just be the full DAG, not just models
@@ -184,34 +297,44 @@ fn models_in_dag_order(manifest: &DbtManifestV12) -> Vec<String> {
 }
 
 pub fn check_all(manifest: &DbtManifestV12, config: &Config) -> CheckResult {
+    check_all_with_report(manifest, config, |_| {})
+}
+
+pub fn check_all_with_report<F>(
+    manifest: &DbtManifestV12,
+    config: &Config,
+    mut reporter: F,
+) -> CheckResult
+where
+    F: FnMut(CheckEvent<'_>),
+{
     let mut result = CheckResult::default();
+    let mut accumulated_changes: BTreeMap<String, ModelChanges> = BTreeMap::new();
     let sorted_nodes = models_in_dag_order(manifest);
 
     for model_id in sorted_nodes {
-        let (model_failure, model_changes) =
-            check_model(manifest, &model_id, &result.model_changes, config);
+        let model_result = check_model(manifest, &model_id, &accumulated_changes, config);
 
-        if let Some(failure) = model_failure {
-            result
-                .failures
-                .models
-                .insert(failure.model_id.clone(), failure);
-        }
-
-        if let Some(changes) = model_changes {
+        if let Some(changes) = model_result.changes() {
+            accumulated_changes.insert(changes.model_id.clone(), changes.clone());
             result
                 .model_changes
-                .insert(changes.model_id.clone(), changes);
+                .insert(changes.model_id.clone(), changes.clone());
         }
+
+        reporter(CheckEvent::Model(&model_result));
+
+        let model_key = model_result.model_id().to_string();
+        result.models.insert(model_key, model_result);
     }
 
     for source in manifest.sources.values() {
-        if let Some(source_failure) = check_source(manifest, source, config) {
-            result
-                .failures
-                .sources
-                .insert(source_failure.source_id.clone(), source_failure);
-        }
+        let source_result = check_source(manifest, source, config);
+
+        reporter(CheckEvent::Source(&source_result));
+
+        let source_key = source_result.source_id().to_string();
+        result.sources.insert(source_key, source_result);
     }
 
     result
@@ -222,12 +345,16 @@ fn check_model(
     model_id: &str,
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
-) -> (Option<ModelFailure>, Option<ModelChanges>) {
+) -> ModelResult {
     let Some(node @ DbtNode::Model(model_meta)) = manifest.nodes.get(model_id) else {
-        return (None, None);
+        return ModelResult::Pass(ModelSuccess {
+            model_id: model_id.to_string(),
+            column_results: BTreeMap::new(),
+            changes: None,
+        });
     };
 
-    let unique_id = model_meta.__common_attr__.unique_id.clone();
+    let model_unique_id = model_meta.__common_attr__.unique_id.clone();
     let patch_path = model_meta.__common_attr__.patch_path.clone();
     let description_missing = config.select.contains(&Selector::MissingModelDescriptions)
         && model_meta.__common_attr__.description.is_none();
@@ -246,14 +373,32 @@ fn check_model(
     let is_rejoining_of_upstream_concepts =
         rejoining_of_upstream_concepts(manifest, model_meta, config);
 
-    let ColumnCheckResult {
-        failures: column_failures,
-        column_changes,
-    } = check_model_columns(manifest, model_id, prior_changes, config);
+    let column_results = check_model_columns(manifest, model_id, prior_changes, config);
+    let has_column_failures = column_results
+        .values()
+        .any(|result| matches!(result, ColumnResult::Fail(_)));
 
-    let has_column_failures = !column_failures.is_empty();
+    let mut column_changes: BTreeMap<String, BTreeSet<ColumnChanges>> = BTreeMap::new();
+    for (column_name, column_result) in &column_results {
+        if let Some(change) = column_result.change() {
+            column_changes
+                .entry(column_name.clone())
+                .or_default()
+                .insert(change.clone());
+        }
+    }
 
-    let model_failure = if description_missing
+    let changes = if column_changes.is_empty() {
+        None
+    } else {
+        Some(ModelChanges {
+            model_id: model_unique_id.clone(),
+            patch_path,
+            column_changes,
+        })
+    };
+
+    if description_missing
         || tags_missing
         || has_column_failures
         || is_direct_join_to_source
@@ -265,11 +410,10 @@ fn check_model(
         || is_multiple_sources_joined
         || is_rejoining_of_upstream_concepts
     {
-        Some(ModelFailure {
-            model_id: unique_id.clone(),
+        ModelResult::Fail(ModelFailure {
+            model_id: model_unique_id,
             description_missing,
             tags_missing,
-            column_failures,
             is_direct_join_to_source,
             is_missing_properties_file,
             is_model_fanout,
@@ -278,18 +422,16 @@ fn check_model(
             is_missing_primary_key,
             is_multiple_sources_joined,
             is_rejoining_of_upstream_concepts,
+            column_results,
+            changes,
         })
     } else {
-        None
-    };
-
-    let model_changes = (!column_changes.is_empty()).then_some(ModelChanges {
-        model_id: unique_id,
-        patch_path,
-        column_changes,
-    });
-
-    (model_failure, model_changes)
+        ModelResult::Pass(ModelSuccess {
+            model_id: model_unique_id,
+            column_results,
+            changes,
+        })
+    }
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
@@ -426,15 +568,15 @@ fn check_model_columns(
     model_id: &str,
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
-) -> ColumnCheckResult {
-    let mut result = ColumnCheckResult::default();
+) -> BTreeMap<String, ColumnResult> {
+    let mut results: BTreeMap<String, ColumnResult> = BTreeMap::new();
     if !config.select.contains(&Selector::MissingColumnDescriptions) {
-        return result;
+        return results;
     }
 
     let (missing_columns, previous_descriptions) = {
         let Some(DbtNode::Model(model)) = manifest.nodes.get(model_id) else {
-            return result;
+            return results;
         };
 
         let missing_columns: Vec<String> = model
@@ -446,7 +588,7 @@ fn check_model_columns(
             .collect();
 
         if missing_columns.is_empty() {
-            return result;
+            return results;
         }
 
         let mut previous_descriptions: BTreeMap<String, Option<String>> = BTreeMap::new();
@@ -464,12 +606,12 @@ fn check_model_columns(
 
     for col_name in &missing_columns {
         if !config.pull_column_desc_from_upstream {
-            result.failures.insert(
+            results.insert(
                 col_name.clone(),
-                ColumnFailure {
+                ColumnResult::Fail(ColumnFailure {
                     column_name: col_name.clone(),
                     description_missing: true,
-                },
+                }),
             );
             continue;
         }
@@ -477,39 +619,45 @@ fn check_model_columns(
             Some(desc) => {
                 let old_description = previous_descriptions.get(col_name).cloned().unwrap_or(None);
                 let new_description = Some(desc);
+                let change = if old_description != new_description {
+                    Some(ColumnChanges {
+                        column_name: col_name.clone(),
+                        old_description,
+                        new_description: new_description.clone(),
+                    })
+                } else {
+                    None
+                };
 
-                if old_description != new_description {
-                    result
-                        .column_changes
-                        .entry(col_name.clone())
-                        .or_default()
-                        .insert(ColumnChanges {
-                            column_name: col_name.clone(),
-                            old_description,
-                            new_description,
-                        });
-                }
+                results.insert(
+                    col_name.clone(),
+                    ColumnResult::Pass(ColumnSuccess {
+                        column_name: col_name.clone(),
+                        change,
+                    }),
+                );
             }
             None => {
-                result.failures.insert(
+                results.insert(
                     col_name.clone(),
-                    ColumnFailure {
+                    ColumnResult::Fail(ColumnFailure {
                         column_name: col_name.clone(),
                         description_missing: true,
-                    },
+                    }),
                 );
             }
         }
     }
 
-    result
+    results
 }
 
 fn check_source(
     manifest: &DbtManifestV12,
     source: &ManifestSource,
     config: &Config,
-) -> Option<SourceFailure> {
+) -> SourceResult {
+    let source_id = source.__common_attr__.unique_id.clone();
     let description_missing = config
         .select
         .contains(&Selector::MissingSourceTableDescriptions)
@@ -523,19 +671,23 @@ fn check_source(
     let is_missing_source_freshness = missing_source_freshness(source, config);
     let is_missing_source_description = missing_source_description(source, config);
 
-    (description_missing
+    if description_missing
         || duplicate_id.is_some()
         || is_unused_source
         || is_missing_source_freshness
-        || is_missing_source_description)
-        .then(|| SourceFailure {
-            source_id: source.__common_attr__.unique_id.clone(),
+        || is_missing_source_description
+    {
+        SourceResult::Fail(SourceFailure {
+            source_id,
             description_missing,
             duplicate_id,
             is_unused_source,
             is_missing_source_freshness,
             is_missing_source_description,
         })
+    } else {
+        SourceResult::Pass(SourceSuccess { source_id })
+    }
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/documentation/#undocumented-sources
@@ -645,23 +797,52 @@ mod tests {
         let manifest = manifest_with_inheritable_column();
         let prior_changes = std::collections::BTreeMap::<String, ModelChanges>::new();
 
-        let (model_failure, model_changes) = check_model(
+        let model_result = check_model(
             &manifest,
             "model.test.downstream",
             &prior_changes,
             &Config::default(),
         );
 
-        let failure = model_failure.expect("expected model failure to be recorded");
-        assert!(failure.column_failures.is_empty());
+        let changes = model_result
+            .changes()
+            .cloned()
+            .expect("expected column changes to be recorded");
+
+        let failure = match model_result {
+            ModelResult::Fail(failure) => failure,
+            ModelResult::Pass(_) => panic!("expected model failure to be recorded"),
+        };
+
+        assert!(
+            failure
+                .column_results
+                .values()
+                .all(|result| matches!(result, ColumnResult::Pass(_)))
+        );
         assert!(failure.description_missing);
-        let changes = model_changes.expect("expected column changes to be recorded");
         assert_eq!(changes.model_id, "model.test.downstream");
         let column_set = changes
             .column_changes
             .get("customer_id")
             .expect("customer_id column should be present");
         let change = column_set.iter().next().expect("change entry should exist");
+        assert_eq!(
+            change.new_description.as_deref(),
+            Some("Upstream description")
+        );
+
+        let column_result = failure
+            .column_results
+            .get("customer_id")
+            .expect("customer_id column should be present");
+        let ColumnResult::Pass(success) = column_result else {
+            panic!("expected column to pass");
+        };
+        let change = success
+            .change
+            .as_ref()
+            .expect("expected change entry for column");
         assert_eq!(
             change.new_description.as_deref(),
             Some("Upstream description")
@@ -677,9 +858,9 @@ mod tests {
         assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));
         let failure = result
-            .failures
             .models
             .get("model.test.downstream")
+            .and_then(ModelResult::as_failure)
             .expect("model failure should be tracked");
         assert!(failure.description_missing);
     }
