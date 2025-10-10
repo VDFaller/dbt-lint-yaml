@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use strsim::levenshtein;
+use struct_field_names_as_array::FieldNamesAsSlice;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
@@ -62,13 +63,6 @@ impl Selector {
     }
 }
 
-const ALLOWED_KEYS: &[&str] = &[
-    "select",
-    "pull_column_desc_from_upstream",
-    "model_fanout_threshold",
-    "required_tests",
-];
-
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Failed to parse dbt-lint.toml: {0}")]
@@ -81,7 +75,7 @@ pub enum ConfigError {
     InvalidRoot,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, FieldNamesAsSlice)]
 pub struct Config {
     #[serde(default = "default_select")]
     pub select: Vec<Selector>,
@@ -158,7 +152,7 @@ fn validate_keys(table: &toml::value::Table) -> Result<(), ConfigError> {
     let mut unknown_messages = Vec::new();
 
     for key in table.keys() {
-        if !ALLOWED_KEYS.contains(&key.as_str()) {
+        if !Config::FIELD_NAMES_AS_SLICE.contains(&key.as_str()) {
             let message = match find_suggestion(key) {
                 Some(suggestion) => {
                     format!("Unknown config key `{key}`. Did you mean `{suggestion}`?")
@@ -172,13 +166,13 @@ fn validate_keys(table: &toml::value::Table) -> Result<(), ConfigError> {
     if unknown_messages.is_empty() {
         Ok(())
     } else {
-        unknown_messages.push(format!("Supported keys: {}", ALLOWED_KEYS.join(", ")));
+        unknown_messages.push(format!("Supported keys: {}", Config::FIELD_NAMES_AS_SLICE.join(", ")));
         Err(ConfigError::UnknownKeys(unknown_messages.join("\n")))
     }
 }
 
 fn find_suggestion(unknown: &str) -> Option<&'static str> {
-    let (candidate, distance) = ALLOWED_KEYS
+    let (candidate, distance) = Config::FIELD_NAMES_AS_SLICE
         .iter()
         .copied()
         .map(|candidate| (candidate, levenshtein(unknown, candidate)))
