@@ -221,6 +221,7 @@ async fn main() -> FsResult<()> {
     if check_result.has_failures() {
         std::process::exit(1);
     }
+    println!("\x1b[32mAll checks passed\x1b[0m");
 
     Ok(())
 }
