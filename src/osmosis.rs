@@ -99,6 +99,7 @@ mod tests {
             ModelChanges {
                 model_id: "model.jaffle_shop.customers".to_string(),
                 patch_path: None,
+                changes: Vec::new(),
                 column_changes: {
                     let mut column_changes = BTreeMap::new();
                     column_changes.insert("customer_id".to_string(), customers_columns);
@@ -112,6 +113,7 @@ mod tests {
             ModelChanges {
                 model_id: "model.jaffle_shop.orders".to_string(),
                 patch_path: None,
+                changes: Vec::new(),
                 column_changes: {
                     let mut column_changes = BTreeMap::new();
                     column_changes.insert("order_id".to_string(), orders_columns);

@@ -39,6 +39,9 @@ pub enum Selector {
     RejoiningOfUpstreamConcepts,
     SourceFanout,
     PublicModelsWithoutContract,
+    // this is fixable, but right now it doesn't work right
+    // if two models have the same patch path
+    #[strum(props(fixable = "false"))]
     ModelsSeparateFromPropertiesFile,
 }
 
@@ -65,6 +68,8 @@ pub struct Config {
     pub fixable: Vec<Selector>,
     #[serde(default)]
     pub unfixable: Vec<Selector>,
+    #[serde(skip)]
+    pub fix: bool,
 
     // args
     #[serde(default = "default_model_fanout_threshold")]
@@ -83,6 +88,7 @@ impl Default for Config {
             exclude: Vec::new(),
             fixable: default_fixable(),
             unfixable: Vec::new(),
+            fix: false,
             model_fanout_threshold: default_model_fanout_threshold(),
             required_tests: Vec::new(),
         }
@@ -95,9 +101,15 @@ impl Config {
     }
 
     pub fn is_fixable(&self, selector: Selector) -> bool {
-        self.is_selected(selector)
+        self.fix
+            && self.is_selected(selector)
             && self.fixable.contains(&selector)
             && !self.unfixable.contains(&selector)
+    }
+
+    pub fn with_fix(mut self, enable: bool) -> Self {
+        self.fix = enable;
+        self
     }
 
     pub fn from_toml(project_dir: &std::path::Path) -> Self {
@@ -202,6 +214,11 @@ mod tests {
             default_model_fanout_threshold()
         );
         assert!(config.is_selected(Selector::MissingColumnDescriptions));
+        assert!(!config.fix, "fix should be disabled by default");
+        assert!(
+            !config.is_fixable(Selector::MissingColumnDescriptions),
+            "fixable selectors require fix to be enabled"
+        );
     }
 
     #[test]
@@ -269,7 +286,11 @@ mod tests {
 
     #[test]
     fn test_is_fixable() {
-        let mut config = Config::default();
+        let mut config = Config {
+            fix: true,
+            ..Default::default()
+        };
+
         assert!(
             config.is_fixable(Selector::MissingColumnDescriptions),
             "MissingColumnDescriptions is fixable"

@@ -44,8 +44,9 @@ fn maybe_handle_version_override() {
     }
 }
 
-fn extract_verbose_flag(args: Vec<OsString>) -> (Vec<OsString>, bool) {
+fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, bool, bool) {
     let mut verbose = false;
+    let mut fix = false;
     let mut filtered = Vec::new();
     let mut iter = args.into_iter();
 
@@ -68,10 +69,14 @@ fn extract_verbose_flag(args: Vec<OsString>) -> (Vec<OsString>, bool) {
             verbose = true;
             continue;
         }
+        if arg == "--fix" {
+            fix = true;
+            continue;
+        }
         filtered.push(arg);
     }
 
-    (filtered, verbose)
+    (filtered, verbose, fix)
 }
 
 #[derive(Default)]
@@ -147,7 +152,7 @@ async fn main() -> FsResult<()> {
     maybe_handle_version_override();
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
-    let (filtered_args, verbose) = extract_verbose_flag(raw_args);
+    let (filtered_args, verbose, fix_flag) = extract_shimmed_flags(raw_args);
 
     let cli = Cli::parse_from(filtered_args);
     let system_args = from_main(&cli);
@@ -157,7 +162,7 @@ async fn main() -> FsResult<()> {
 
     let load_args = LoadArgs::from_eval_args(&eval_args);
     let project_dir = load_args.io.in_dir.clone();
-    let config = Config::from_toml(&project_dir);
+    let config = Config::from_toml(&project_dir).with_fix(fix_flag);
 
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
     let _cts = CancellationTokenSource::new();
@@ -209,22 +214,26 @@ async fn main() -> FsResult<()> {
         }
     }
 
-    if let Some(model_changes) =
-        (!check_result.model_changes.is_empty()).then_some(&check_result.model_changes)
-    {
-        match writeback::apply_model_changes_with_ruamel(project_dir.as_path(), model_changes) {
-            Ok(applied) => {
-                for (model_id, columns) in applied {
-                    if columns.is_empty() {
-                        continue;
+    if config.fix {
+        if let Some(model_changes) =
+            (!check_result.model_changes.is_empty()).then_some(&check_result.model_changes)
+        {
+            match writeback::apply_model_changes_with_ruamel(project_dir.as_path(), model_changes) {
+                Ok(applied) => {
+                    for (model_id, columns) in applied {
+                        if columns.is_empty() {
+                            continue;
+                        }
+                        println!("Applied ruamel.yaml updates for {model_id}: {columns:?}");
                     }
-                    println!("Applied ruamel.yaml updates for {model_id}: {columns:?}");
+                }
+                Err(err) => {
+                    eprintln!("Failed to apply YAML updates: {err}");
                 }
             }
-            Err(err) => {
-                eprintln!("Failed to apply YAML updates: {err}");
-            }
         }
+    } else if !check_result.model_changes.is_empty() {
+        println!("Fixes available; re-run with --fix to apply them.");
     }
 
     if check_result.has_failures() {
