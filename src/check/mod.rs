@@ -11,8 +11,21 @@ use models::check_model;
 use sources::check_source;
 
 pub use columns::{ColumnChange, ColumnFailure, ColumnResult};
-pub use models::{ModelChanges, ModelFailure, ModelResult};
+pub use models::{ModelChange, ModelChanges, ModelFailure, ModelResult};
 pub use sources::{SourceFailure, SourceResult};
+
+#[derive(Debug, Clone)]
+pub enum RuleOutcome<F, C> {
+    Pass,
+    Fail(F),
+    Change(C),
+}
+
+impl<F, C> RuleOutcome<F, C> {
+    pub fn is_pass(&self) -> bool {
+        matches!(self, Self::Pass)
+    }
+}
 
 #[derive(Default, Debug)]
 pub struct CheckResult {
@@ -184,7 +197,8 @@ mod tests {
     fn check_all_collects_model_changes() {
         let manifest = manifest_with_inheritable_column();
 
-        let result = check_all(&manifest, &Config::default());
+        let config = Config::default().with_fix(true);
+        let result = check_all(&manifest, &config);
 
         assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));

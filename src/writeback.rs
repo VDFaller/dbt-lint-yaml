@@ -1,8 +1,8 @@
-use crate::check::{ColumnChange, ModelChanges};
+use crate::check::{ColumnChange, ModelChange, ModelChanges};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    env,
+    env, fs,
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -23,6 +23,8 @@ pub enum WriteBackError {
     PythonFailure { status: i32, stderr: String },
     #[error("failed to parse python helper response: {0}")]
     ResponseParseFailure(serde_json::Error),
+    #[error("unsupported model change `{change}` for model `{model_id}`")]
+    UnsupportedModelChange { model_id: String, change: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -65,11 +67,34 @@ pub fn apply_model_changes_with_ruamel(
                     model_id: model_changes.model_id.clone(),
                 })?;
 
-        let resolved_path = if patch_path.is_absolute() {
+        let mut resolved_path = if patch_path.is_absolute() {
             patch_path.clone()
         } else {
             project_root.join(patch_path)
         };
+
+        for change in &model_changes.changes {
+            match change {
+                ModelChange::MovePropertiesFile { new_path } => {
+                    let new_resolved_path = if new_path.is_absolute() {
+                        new_path.clone()
+                    } else {
+                        project_root.join(new_path)
+                    };
+                    if let Some(parent) = new_resolved_path.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::rename(&resolved_path, &new_resolved_path)?;
+                    resolved_path = new_resolved_path;
+                }
+                other => {
+                    return Err(WriteBackError::UnsupportedModelChange {
+                        model_id: model_changes.model_id.clone(),
+                        change: format!("{other:?}"),
+                    });
+                }
+            }
+        }
 
         let model_name = extract_model_name(&model_changes.model_id);
 
@@ -88,6 +113,9 @@ pub fn apply_model_changes_with_ruamel(
         }
 
         if column_changes.is_empty() {
+            if !model_changes.changes.is_empty() {
+                results.push((model_changes.model_id.clone(), Vec::new()));
+            }
             continue;
         }
 

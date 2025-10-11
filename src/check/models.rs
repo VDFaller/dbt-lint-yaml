@@ -1,3 +1,4 @@
+use super::RuleOutcome;
 use super::columns::{self, ColumnChange, ColumnFailure, ColumnResult};
 use crate::{
     config::{Config, Selector},
@@ -26,8 +27,8 @@ pub enum ModelFailure {
     RejoiningOfUpstreamConcepts(Vec<String>),
     PublicModelWithoutContract,
     ModelSeparateFromPropertiesFile {
-        patch_path: String,
-        original_file_path: String,
+        patch_path: PathBuf,
+        original_file_path: PathBuf,
     },
 }
 
@@ -49,7 +50,11 @@ impl Display for ModelFailure {
                 patch_path,
                 original_file_path,
             } => {
-                format!(" (patch_path: {patch_path}, original_file_path: {original_file_path})")
+                format!(
+                    " (patch_path: {}, original_file_path: {})",
+                    patch_path.display(),
+                    original_file_path.display()
+                )
             }
             _ => String::new(),
         };
@@ -57,11 +62,19 @@ impl Display for ModelFailure {
     }
 }
 
-// TODO: Change ModelChanges to pull from an enum of possible changes
+#[derive(Debug, Clone)]
+pub enum ModelChange {
+    MovePropertiesFile { new_path: PathBuf },
+    MoveModelFile { new_path: PathBuf },
+}
+
+type ModelRuleOutcome = RuleOutcome<ModelFailure, ModelChange>;
+
 #[derive(Default, Debug, Clone)]
 pub struct ModelChanges {
     pub model_id: String,
     pub patch_path: Option<PathBuf>,
+    pub changes: Vec<ModelChange>,
     pub column_changes: BTreeMap<String, BTreeSet<ColumnChange>>,
 }
 
@@ -69,7 +82,7 @@ pub struct ModelChanges {
 pub struct ModelResult {
     pub model_id: String,
     pub failures: Vec<ModelFailure>,
-    pub column_results: BTreeMap<String, ColumnResult>,
+    pub column_results: BTreeMap<String, ColumnResult>, // kind of hate this, but...
     pub changes: Option<ModelChanges>,
 }
 
@@ -139,6 +152,7 @@ pub(crate) fn check_model(
     let _model_type = model_type(model_meta); // currently unused
 
     let mut failures: Vec<ModelFailure> = Vec::new();
+    let mut model_level_changes: Vec<ModelChange> = Vec::new();
     if let Some(f) = missing_model_description(model_meta, config) {
         failures.push(f)
     }
@@ -172,8 +186,10 @@ pub(crate) fn check_model(
     if let Some(f) = public_model_without_contract(model_meta, config) {
         failures.push(f)
     }
-    if let Some(f) = model_separate_from_properties_file(node, config) {
-        failures.push(f)
+    match model_separate_from_properties_file(node, config) {
+        ModelRuleOutcome::Pass => {}
+        ModelRuleOutcome::Fail(failure) => failures.push(failure),
+        ModelRuleOutcome::Change(change) => model_level_changes.push(change),
     }
 
     let column_results = check_model_columns(manifest, model_meta, prior_changes, config);
@@ -188,12 +204,16 @@ pub(crate) fn check_model(
         }
     }
 
-    let changes = if column_changes.is_empty() {
+    let has_model_changes = !model_level_changes.is_empty();
+    let has_column_changes = !column_changes.is_empty();
+
+    let changes = if !has_model_changes && !has_column_changes {
         None
     } else {
         Some(ModelChanges {
             model_id: model_unique_id.clone(),
             patch_path,
+            changes: model_level_changes,
             column_changes,
         })
     };
@@ -355,30 +375,45 @@ fn missing_primary_key(model: &ManifestModel, config: &Config) -> Option<ModelFa
     missing_pk.then_some(ModelFailure::MissingPrimaryKey)
 }
 
-fn model_separate_from_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailure> {
+fn model_separate_from_properties_file(node: &DbtNode, config: &Config) -> ModelRuleOutcome {
     if !config.is_selected(Selector::ModelsSeparateFromPropertiesFile) {
-        return None;
+        return ModelRuleOutcome::Pass;
     }
-    let patch_path = match node {
-        DbtNode::Model(model) => model.__common_attr__.patch_path.as_ref(),
-        DbtNode::Seed(seed) => seed.__common_attr__.patch_path.as_ref(),
-        DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.as_ref(),
-        _ => return None,
-    }?;
-
-    let original_path = match node {
-        DbtNode::Model(model) => &model.__common_attr__.original_file_path,
-        DbtNode::Seed(seed) => &seed.__common_attr__.original_file_path,
-        DbtNode::Snapshot(snap) => &snap.__common_attr__.original_file_path,
-        _ => return None,
+    let (patch_path, original_path) = match node {
+        DbtNode::Model(model) => (
+            model.__common_attr__.patch_path.as_deref(),
+            model.__common_attr__.original_file_path.as_path(),
+        ),
+        DbtNode::Seed(seed) => (
+            seed.__common_attr__.patch_path.as_deref(),
+            seed.__common_attr__.original_file_path.as_path(),
+        ),
+        DbtNode::Snapshot(snap) => (
+            snap.__common_attr__.patch_path.as_deref(),
+            snap.__common_attr__.original_file_path.as_path(),
+        ),
+        _ => return ModelRuleOutcome::Pass,
     };
 
-    (patch_path.parent() != original_path.parent()).then_some(
-        ModelFailure::ModelSeparateFromPropertiesFile {
-            patch_path: patch_path.display().to_string(),
-            original_file_path: original_path.display().to_string(),
-        },
-    )
+    // we only care when the properties file sits in a different directory
+    let Some(patch_path) = patch_path.filter(|path| path.parent() != original_path.parent()) else {
+        return ModelRuleOutcome::Pass;
+    };
+
+    let failure = ModelFailure::ModelSeparateFromPropertiesFile {
+        patch_path: patch_path.to_path_buf(),
+        original_file_path: original_path.to_path_buf(),
+    };
+
+    if config.is_fixable(Selector::ModelsSeparateFromPropertiesFile)
+        && let Some(original_parent) = original_path.parent()
+        && let Some(file_name) = patch_path.file_name()
+    {
+        let new_path = original_parent.join(file_name);
+        return ModelRuleOutcome::Change(ModelChange::MovePropertiesFile { new_path });
+    }
+
+    ModelRuleOutcome::Fail(failure)
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#rejoining-of-upstream-concepts
@@ -552,12 +587,8 @@ mod tests {
         let manifest = manifest_with_inheritable_column();
         let prior_changes = BTreeMap::<String, ModelChanges>::new();
 
-        let model_result = check_model(
-            &manifest,
-            "model.test.downstream",
-            &prior_changes,
-            &Config::default(),
-        );
+        let config = Config::default().with_fix(true);
+        let model_result = check_model(&manifest, "model.test.downstream", &prior_changes, &config);
 
         let changes = model_result
             .changes()

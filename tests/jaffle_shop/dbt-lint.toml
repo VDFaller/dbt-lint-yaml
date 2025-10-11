@@ -1,4 +1,3 @@
 exclude = ["missing_model_tags"]
-unfixable = ["missing_column_descriptions"]
 model_fanout_threshold = 3
 required_tests = []
