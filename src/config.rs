@@ -1,15 +1,27 @@
 use serde::{Deserialize, Serialize};
 use strsim::levenshtein;
 use struct_field_names_as_array::FieldNamesAsSlice;
-use strum::{AsRefStr, EnumIter, IntoEnumIterator};
+use strum::{AsRefStr, EnumIter, EnumProperty, IntoEnumIterator};
 use thiserror::Error;
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize, EnumIter, AsRefStr,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    EnumIter,
+    AsRefStr,
+    EnumProperty,
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum Selector {
+    #[strum(props(fixable = "true"))]
     MissingColumnDescriptions,
     MissingModelDescriptions,
     MissingModelTags,
@@ -44,12 +56,17 @@ pub enum ConfigError {
 
 #[derive(Debug, Deserialize, Serialize, FieldNamesAsSlice)]
 pub struct Config {
+    // selectors
     #[serde(default = "default_select")]
     pub select: Vec<Selector>,
-    #[serde(default = "default_exclude")]
+    #[serde(default)]
     pub exclude: Vec<Selector>,
-    #[serde(default = "default_pull_column_desc_from_upstream")]
-    pub pull_column_desc_from_upstream: bool,
+    #[serde(default = "default_fixable")]
+    pub fixable: Vec<Selector>,
+    #[serde(default)]
+    pub unfixable: Vec<Selector>,
+
+    // args
     #[serde(default = "default_model_fanout_threshold")]
     // I'm intentionally not matching dbt-project-evaluator (models_fanout_threshold)
     // because this makes more sense to me
@@ -63,8 +80,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             select: default_select(),
-            exclude: default_exclude(),
-            pull_column_desc_from_upstream: default_pull_column_desc_from_upstream(),
+            exclude: Vec::new(),
+            fixable: default_fixable(),
+            unfixable: Vec::new(),
             model_fanout_threshold: default_model_fanout_threshold(),
             required_tests: Vec::new(),
         }
@@ -74,6 +92,12 @@ impl Default for Config {
 impl Config {
     pub fn is_selected(&self, selector: Selector) -> bool {
         self.select.contains(&selector) && !self.exclude.contains(&selector)
+    }
+
+    pub fn is_fixable(&self, selector: Selector) -> bool {
+        self.is_selected(selector)
+            && self.fixable.contains(&selector)
+            && !self.unfixable.contains(&selector)
     }
 
     pub fn from_toml(project_dir: &std::path::Path) -> Self {
@@ -115,15 +139,14 @@ fn default_select() -> Vec<Selector> {
     Selector::iter().collect()
 }
 
-fn default_exclude() -> Vec<Selector> {
-    Vec::new()
-}
-
-fn default_pull_column_desc_from_upstream() -> bool {
-    true
-}
 fn default_model_fanout_threshold() -> usize {
     3
+}
+
+fn default_fixable() -> Vec<Selector> {
+    Selector::iter()
+        .filter(|s| s.get_str("fixable") == Some("true"))
+        .collect()
 }
 
 fn validate_keys(table: &toml::value::Table) -> Result<(), ConfigError> {
@@ -171,11 +194,9 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert_eq!(config.select, default_select());
-        assert_eq!(config.exclude, default_exclude());
-        assert_eq!(
-            config.pull_column_desc_from_upstream,
-            default_pull_column_desc_from_upstream()
-        );
+        assert_eq!(config.exclude, Vec::new());
+        assert_eq!(config.fixable, default_fixable());
+        assert_eq!(config.unfixable, Vec::new());
         assert_eq!(
             config.model_fanout_threshold,
             default_model_fanout_threshold()
@@ -187,7 +208,7 @@ mod tests {
     fn test_from_toml_str() {
         let toml_str = r#"
             select = ["missing_column_descriptions", "missing_model_tags"]
-            pull_column_desc_from_upstream = false
+            exclude = ["missing_model_tags"]
             model_fanout_threshold = 4
         "#;
         let config = Config::from_toml_str(toml_str);
@@ -196,23 +217,17 @@ mod tests {
             vec![
                 Selector::MissingColumnDescriptions,
                 Selector::MissingModelTags
-            ]
+            ],
+            "Unexpected select"
         );
-        assert!(config.exclude.is_empty());
-        assert!(!config.pull_column_desc_from_upstream);
-        assert_eq!(config.model_fanout_threshold, 4);
-    }
-
-    #[test]
-    fn test_exclude_overrides_select() {
-        let toml_str = r#"
-            select = ["missing_model_tags"]
-            exclude = ["missing_model_tags"]
-        "#;
-        let config = Config::from_toml_str(toml_str);
-        assert_eq!(config.select, vec![Selector::MissingModelTags]);
-        assert_eq!(config.exclude, vec![Selector::MissingModelTags]);
-        assert!(!config.is_selected(Selector::MissingModelTags));
+        assert!(
+            !config.is_selected(Selector::MissingModelTags),
+            "missing_model_tags not overridden by exclude"
+        );
+        assert_eq!(
+            config.model_fanout_threshold, 4,
+            "Unexpected model_fanout_threshold"
+        );
     }
 
     #[test]
@@ -222,9 +237,18 @@ mod tests {
         "#;
         let err = Config::try_from_str(toml_str).expect_err("unknown key should error");
         let message = err.to_string();
-        assert!(message.contains("models_fanout_threshold"));
-        assert!(message.contains("Did you mean `model_fanout_threshold`"));
-        assert!(message.contains("Supported keys"));
+        assert!(
+            message.contains("models_fanout_threshold"),
+            "Unexpected error message"
+        );
+        assert!(
+            message.contains("Did you mean `model_fanout_threshold`"),
+            "Missing suggestion"
+        );
+        assert!(
+            message.contains("Supported keys"),
+            "Supported keys not listed"
+        );
     }
 
     #[test]
@@ -241,5 +265,31 @@ mod tests {
                 "error should mention {expected}, got: {message}"
             );
         }
+    }
+
+    #[test]
+    fn test_is_fixable() {
+        let mut config = Config::default();
+        assert!(
+            config.is_fixable(Selector::MissingColumnDescriptions),
+            "MissingColumnDescriptions is fixable"
+        );
+        assert!(
+            !config.is_fixable(Selector::DirectJoinToSource),
+            "DirectJoinToSource is not fixable"
+        );
+
+        config.exclude = vec![Selector::MissingColumnDescriptions];
+        assert!(
+            !config.is_fixable(Selector::MissingColumnDescriptions),
+            "MissingColumnDescriptions is not fixable if excluded"
+        );
+
+        config.exclude.clear();
+        config.unfixable = vec![Selector::MissingColumnDescriptions];
+        assert!(
+            !config.is_fixable(Selector::MissingColumnDescriptions),
+            "MissingColumnDescriptions is not fixable if unfixable"
+        );
     }
 }

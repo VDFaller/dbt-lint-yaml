@@ -497,7 +497,7 @@ fn check_model_columns(
     };
 
     for col_name in &missing_columns {
-        if !config.pull_column_desc_from_upstream {
+        if !config.is_fixable(Selector::MissingColumnDescriptions) {
             results.insert(
                 col_name.clone(),
                 ColumnResult {
