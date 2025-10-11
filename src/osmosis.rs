@@ -1,4 +1,4 @@
-use crate::check::ModelChanges;
+use crate::check::{ColumnChange, ModelChanges};
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::BTreeMap;
 
@@ -58,19 +58,20 @@ fn lookup_model_change_description(
     col_name: &str,
 ) -> Option<String> {
     model_changes.get(upstream_id).and_then(|change| {
-        change
-            .column_changes
-            .values()
-            .flat_map(|changes| changes.iter())
-            .find(|column_change| column_change.column_name == col_name)
-            .and_then(|column_change| column_change.new_description.clone())
+        change.column_changes.get(col_name).and_then(|changes| {
+            changes
+                .iter()
+                .find_map(|column_change| match column_change {
+                    ColumnChange::DescriptionChanged { new, .. } => new.clone(),
+                })
+        })
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{get_upstream_col_desc, lookup_model_change_description};
-    use crate::check::{ColumnChanges, ModelChanges};
+    use crate::check::{ColumnChange, ModelChanges};
     use dbt_schemas::schemas::{
         dbt_column::DbtColumn,
         manifest::{DbtManifestV12, DbtNode, ManifestSeed},
@@ -81,17 +82,15 @@ mod tests {
     // FIXTURES
     fn model_changes_fixture() -> BTreeMap<String, ModelChanges> {
         let mut customers_columns = BTreeSet::new();
-        customers_columns.insert(ColumnChanges {
-            column_name: "customer_id".to_string(),
-            old_description: Some("Old description".to_string()),
-            new_description: Some("Fresh description".to_string()),
+        customers_columns.insert(ColumnChange::DescriptionChanged {
+            old: Some("Old description".to_string()),
+            new: Some("Fresh description".to_string()),
         });
 
         let mut orders_columns = BTreeSet::new();
-        orders_columns.insert(ColumnChanges {
-            column_name: "order_id".to_string(),
-            old_description: None,
-            new_description: Some("New order description".to_string()),
+        orders_columns.insert(ColumnChange::DescriptionChanged {
+            old: None,
+            new: Some("New order description".to_string()),
         });
 
         let mut map = BTreeMap::new();

@@ -3,15 +3,15 @@ use dbt_dag::deps_mgmt::topological_sort;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod columns;
 mod models;
 mod sources;
 
 use models::check_model;
 use sources::check_source;
 
-pub use models::{
-    ColumnChanges, ColumnFailure, ColumnResult, ModelChanges, ModelFailure, ModelResult,
-};
+pub use columns::{ColumnChange, ColumnFailure, ColumnResult};
+pub use models::{ModelChanges, ModelFailure, ModelResult};
 pub use sources::{SourceFailure, SourceResult};
 
 #[derive(Default, Debug)]

@@ -1,6 +1,6 @@
 use clap::Parser;
 use dbt_lint_yaml::{
-    check::{CheckEvent, check_all_with_report},
+    check::{CheckEvent, ColumnChange, check_all_with_report},
     config::Config,
     writeback,
 };
@@ -196,11 +196,15 @@ async fn main() -> FsResult<()> {
         println!("Model: {model} has found changes");
         for (column, column_changes) in model_changes.column_changes.iter() {
             for change in column_changes {
-                println!(
-                    "  Column: {} - New Description: {}",
-                    column,
-                    change.new_description.as_deref().unwrap_or("None"),
-                );
+                match change {
+                    ColumnChange::DescriptionChanged { new, .. } => {
+                        println!(
+                            "  Column: {} - New Description: {}",
+                            column,
+                            new.as_deref().unwrap_or("None"),
+                        );
+                    }
+                }
             }
         }
     }

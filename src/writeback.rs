@@ -1,4 +1,4 @@
-use crate::check::ModelChanges;
+use crate::check::{ColumnChange, ModelChanges};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -74,12 +74,16 @@ pub fn apply_model_changes_with_ruamel(
         let model_name = extract_model_name(&model_changes.model_id);
 
         let mut column_changes = Vec::new();
-        for change_set in model_changes.column_changes.values() {
+        for (column_name, change_set) in &model_changes.column_changes {
             for change in change_set {
-                column_changes.push(PythonColumnChange {
-                    column_name: &change.column_name,
-                    new_description: change.new_description.as_deref(),
-                });
+                match change {
+                    ColumnChange::DescriptionChanged { new, .. } => {
+                        column_changes.push(PythonColumnChange {
+                            column_name: column_name.as_str(),
+                            new_description: new.as_deref(),
+                        });
+                    }
+                }
             }
         }
 

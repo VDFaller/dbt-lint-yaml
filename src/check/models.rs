@@ -1,8 +1,12 @@
+use super::columns::{self, ColumnChange, ColumnFailure, ColumnResult};
 use crate::{
     config::{Config, Selector},
     osmosis::get_upstream_col_desc,
 };
-use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel};
+use dbt_schemas::schemas::{
+    dbt_column::DbtColumnRef,
+    manifest::{DbtManifestV12, DbtNode, ManifestModel},
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -53,56 +57,12 @@ impl Display for ModelFailure {
     }
 }
 
-#[derive(Debug, Clone, AsRefStr, PartialEq, Eq)]
-pub enum ColumnFailure {
-    DescriptionMissing,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ColumnResult {
-    pub column_name: String,
-    pub failures: Vec<ColumnFailure>,
-    pub change: Option<ColumnChanges>,
-}
-
-impl ColumnResult {
-    pub fn is_pass(&self) -> bool {
-        self.failures.is_empty()
-    }
-
-    pub fn is_failure(&self) -> bool {
-        !self.is_pass()
-    }
-
-    pub fn change(&self) -> Option<&ColumnChanges> {
-        self.change.as_ref()
-    }
-
-    pub fn failure_reasons(&self) -> Vec<String> {
-        self.failures
-            .iter()
-            .map(|failure| match failure {
-                ColumnFailure::DescriptionMissing => {
-                    format!("Column `{}`: Missing Description", self.column_name)
-                }
-            })
-            .collect()
-    }
-}
-
 // TODO: Change ModelChanges to pull from an enum of possible changes
 #[derive(Default, Debug, Clone)]
 pub struct ModelChanges {
     pub model_id: String,
     pub patch_path: Option<PathBuf>,
-    pub column_changes: BTreeMap<String, BTreeSet<ColumnChanges>>,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ColumnChanges {
-    pub column_name: String,
-    pub old_description: Option<String>,
-    pub new_description: Option<String>,
+    pub column_changes: BTreeMap<String, BTreeSet<ColumnChange>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -216,11 +176,11 @@ pub(crate) fn check_model(
         failures.push(f)
     }
 
-    let column_results = check_model_columns(manifest, model_id, prior_changes, config);
+    let column_results = check_model_columns(manifest, model_meta, prior_changes, config);
 
-    let mut column_changes: BTreeMap<String, BTreeSet<ColumnChanges>> = BTreeMap::new();
+    let mut column_changes: BTreeMap<String, BTreeSet<ColumnChange>> = BTreeMap::new();
     for (column_name, column_result) in &column_results {
-        if let Some(change) = column_result.change() {
+        for change in column_result.changes() {
             column_changes
                 .entry(column_name.clone())
                 .or_default()
@@ -242,6 +202,47 @@ pub(crate) fn check_model(
         model_id: model_unique_id,
         failures,
         column_results,
+        changes,
+    }
+}
+
+fn check_model_column(
+    manifest: &DbtManifestV12,
+    model: &ManifestModel,
+    column: &DbtColumnRef,
+    prior_changes: &BTreeMap<String, ModelChanges>,
+    config: &Config,
+) -> ColumnResult {
+    let mut failures: Vec<ColumnFailure> = Vec::new();
+    let mut changes: Vec<ColumnChange> = Vec::new();
+
+    if config.is_selected(Selector::MissingColumnDescriptions)
+        && let Some(failure) = columns::missing_description(column)
+    {
+        // Attempt to fix the missing description
+        if !config.is_fixable(Selector::MissingColumnDescriptions) {
+            failures.push(failure);
+        } else if let Some(new_description) = get_upstream_col_desc(
+            manifest,
+            Some(prior_changes),
+            &model.__common_attr__.unique_id,
+            column.name.as_str(),
+        ) {
+            let old_description = column.description.clone();
+            let new_description = Some(new_description);
+
+            changes.push(ColumnChange::DescriptionChanged {
+                old: old_description,
+                new: new_description.clone(),
+            });
+        } else {
+            failures.push(failure);
+        }
+    }
+
+    ColumnResult {
+        column_name: column.name.clone(),
+        failures,
         changes,
     }
 }
@@ -457,93 +458,18 @@ fn missing_required_tests(
 
 fn check_model_columns(
     manifest: &DbtManifestV12,
-    model_id: &str,
+    model: &ManifestModel,
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
 ) -> BTreeMap<String, ColumnResult> {
     let mut results: BTreeMap<String, ColumnResult> = BTreeMap::new();
-    if !config.is_selected(Selector::MissingColumnDescriptions) {
-        return results;
+    let columns = &model.__base_attr__.columns;
+
+    for (col_name, column) in columns.iter() {
+        let result = check_model_column(manifest, model, column, prior_changes, config);
+
+        results.insert(col_name.clone(), result);
     }
-
-    let (missing_columns, previous_descriptions) = {
-        let Some(DbtNode::Model(model)) = manifest.nodes.get(model_id) else {
-            return results;
-        };
-
-        let missing_columns: Vec<String> = model
-            .__base_attr__
-            .columns
-            .values()
-            .filter(|col| col.description.is_none())
-            .map(|col| col.name.clone())
-            .collect();
-
-        if missing_columns.is_empty() {
-            return results;
-        }
-
-        let mut previous_descriptions: BTreeMap<String, Option<String>> = BTreeMap::new();
-        for col_name in &missing_columns {
-            let description = model
-                .__base_attr__
-                .columns
-                .get(col_name)
-                .and_then(|col| col.description.clone());
-            previous_descriptions.insert(col_name.clone(), description);
-        }
-
-        (missing_columns, previous_descriptions)
-    };
-
-    for col_name in &missing_columns {
-        if !config.is_fixable(Selector::MissingColumnDescriptions) {
-            results.insert(
-                col_name.clone(),
-                ColumnResult {
-                    column_name: col_name.clone(),
-                    failures: vec![ColumnFailure::DescriptionMissing],
-                    change: None,
-                },
-            );
-            continue;
-        }
-        match get_upstream_col_desc(manifest, Some(prior_changes), model_id, col_name) {
-            Some(desc) => {
-                let old_description = previous_descriptions.get(col_name).cloned().unwrap_or(None);
-                let new_description = Some(desc);
-                let change = if old_description != new_description {
-                    Some(ColumnChanges {
-                        column_name: col_name.clone(),
-                        old_description,
-                        new_description: new_description.clone(),
-                    })
-                } else {
-                    None
-                };
-
-                results.insert(
-                    col_name.clone(),
-                    ColumnResult {
-                        column_name: col_name.clone(),
-                        failures: Vec::new(),
-                        change,
-                    },
-                );
-            }
-            None => {
-                results.insert(
-                    col_name.clone(),
-                    ColumnResult {
-                        column_name: col_name.clone(),
-                        failures: vec![ColumnFailure::DescriptionMissing],
-                        change: None,
-                    },
-                );
-            }
-        }
-    }
-
     results
 }
 
@@ -659,10 +585,11 @@ mod tests {
             .get("customer_id")
             .expect("customer_id column should be present");
         let change = column_set.iter().next().expect("change entry should exist");
-        assert_eq!(
-            change.new_description.as_deref(),
-            Some("Upstream description")
-        );
+        match change {
+            ColumnChange::DescriptionChanged { new, .. } => {
+                assert_eq!(new.as_deref(), Some("Upstream description"));
+            }
+        }
 
         let column_result = model_result
             .column_results
@@ -670,12 +597,14 @@ mod tests {
             .expect("customer_id column should be present");
         assert!(column_result.is_pass(), "expected column to pass");
         let change = column_result
-            .change()
+            .changes()
+            .first()
             .expect("expected change entry for column");
-        assert_eq!(
-            change.new_description.as_deref(),
-            Some("Upstream description")
-        );
+        match change {
+            ColumnChange::DescriptionChanged { new, .. } => {
+                assert_eq!(new.as_deref(), Some("Upstream description"));
+            }
+        }
     }
 
     #[test]
