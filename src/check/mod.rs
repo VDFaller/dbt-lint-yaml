@@ -10,10 +10,9 @@ use models::check_model;
 use sources::check_source;
 
 pub use models::{
-    ColumnChanges, ColumnFailure, ColumnResult, ColumnSuccess, ModelChanges, ModelFailure,
-    ModelResult, ModelSuccess,
+    ColumnChanges, ColumnFailure, ColumnResult, ModelChanges, ModelFailure, ModelResult,
 };
-pub use sources::{SourceFailure, SourceResult, SourceSuccess};
+pub use sources::{SourceFailure, SourceResult};
 
 #[derive(Default, Debug)]
 pub struct CheckResult {
@@ -28,12 +27,12 @@ impl CheckResult {
             || self.sources.values().any(SourceResult::is_failure)
     }
 
-    pub fn model_failures(&self) -> impl Iterator<Item = &ModelFailure> {
-        self.models.values().filter_map(ModelResult::as_failure)
+    pub fn model_failures(&self) -> impl Iterator<Item = &ModelResult> {
+        self.models.values().filter(|result| result.is_failure())
     }
 
-    pub fn source_failures(&self) -> impl Iterator<Item = &SourceFailure> {
-        self.sources.values().filter_map(SourceResult::as_failure)
+    pub fn source_failures(&self) -> impl Iterator<Item = &SourceResult> {
+        self.sources.values().filter(|result| result.is_failure())
     }
 }
 
@@ -189,11 +188,15 @@ mod tests {
 
         assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));
-        let failure = result
+        let model_result = result
             .models
             .get("model.test.downstream")
-            .and_then(ModelResult::as_failure)
-            .expect("model failure should be tracked");
-        assert!(failure.description_missing);
+            .expect("model result should be tracked");
+        assert!(model_result.is_failure());
+        assert!(
+            model_result
+                .failures()
+                .contains(&ModelFailure::DescriptionMissing)
+        );
     }
 }

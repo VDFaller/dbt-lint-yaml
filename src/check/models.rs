@@ -6,115 +6,87 @@ use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::PathBuf;
+use strum::AsRefStr;
 
-#[derive(Default, Debug)]
-pub struct ModelFailure {
-    pub model_id: String,
-    pub description_missing: bool,
-    pub tags_missing: bool,
-    pub is_direct_join_to_source: bool,
-    pub is_missing_properties_file: bool,
-    pub is_model_fanout: bool,
-    pub is_missing_required_tests: bool,
-    pub is_root_model: bool,
-    pub is_missing_primary_key: bool,
-    pub is_multiple_sources_joined: bool,
-    pub is_rejoining_of_upstream_concepts: bool,
-    pub is_public_model_without_contract: bool,
-    pub is_model_separate_from_properties_file: bool, // I don't think I like the name
-    pub column_results: BTreeMap<String, ColumnResult>,
-    pub changes: Option<ModelChanges>,
+#[derive(Debug, Clone, AsRefStr, PartialEq, Eq)]
+pub enum ModelFailure {
+    DescriptionMissing,
+    TagsMissing(Vec<String>),
+    DirectJoinToSource(Vec<String>),
+    MissingPropertiesFile,
+    ModelFanout(usize),
+    MissingRequiredTests(Vec<String>),
+    RootModel,
+    MissingPrimaryKey,
+    MultipleSourcesJoined(Vec<String>),
+    RejoiningOfUpstreamConcepts(Vec<String>),
+    PublicModelWithoutContract,
+    ModelSeparateFromPropertiesFile {
+        patch_path: String,
+        original_file_path: String,
+    },
 }
 
 impl Display for ModelFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "ModelFailure: {}", self.model_id)?;
-        for reason in self.failure_reasons() {
-            writeln!(f, "  - {reason}")?;
-        }
-        Ok(())
-    }
-}
-
-impl ModelFailure {
-    pub fn failure_reasons(&self) -> Vec<String> {
-        let mut reasons = Vec::new();
-
-        self.description_missing
-            .then(|| reasons.push("Missing Description".to_string()));
-        self.tags_missing
-            .then(|| reasons.push("Missing Tags".to_string()));
-        self.is_direct_join_to_source
-            .then(|| reasons.push("Direct join to source detected".to_string()));
-        self.is_missing_properties_file
-            .then(|| reasons.push("Missing properties file".to_string()));
-        self.is_model_fanout
-            .then(|| reasons.push("Model fanout exceeds threshold".to_string()));
-        self.is_missing_required_tests
-            .then(|| reasons.push("Missing required tests".to_string()));
-        self.is_root_model
-            .then(|| reasons.push("Root model (no dependencies)".to_string()));
-        self.is_missing_primary_key
-            .then(|| reasons.push("Missing Primary Key".to_string()));
-        self.is_multiple_sources_joined
-            .then(|| reasons.push("Joins multiple sources".to_string()));
-        self.is_rejoining_of_upstream_concepts
-            .then(|| reasons.push("Rejoining of upstream concepts".to_string()));
-        self.is_public_model_without_contract
-            .then(|| reasons.push("Public model without contract".to_string()));
-        self.is_model_separate_from_properties_file
-            .then(|| reasons.push("Model separate from properties file".to_string()));
-
-        for column_result in self.column_results.values() {
-            if let ColumnResult::Fail(column_failure) = column_result {
-                reasons.push(column_failure.summary());
+        let extra_info = match self {
+            ModelFailure::TagsMissing(tags) => format!(" (tags: {})", tags.join(",")),
+            ModelFailure::DirectJoinToSource(sources) => {
+                format!(" (sources: {})", sources.join(","))
             }
-        }
-
-        reasons
+            ModelFailure::MissingRequiredTests(tests) => format!(" (tests: {})", tests.join(",")),
+            ModelFailure::MultipleSourcesJoined(sources) => {
+                format!(" (sources: {})", sources.join(","))
+            }
+            ModelFailure::RejoiningOfUpstreamConcepts(concepts) => {
+                format!(" (concepts: {})", concepts.join(","))
+            }
+            ModelFailure::ModelSeparateFromPropertiesFile {
+                patch_path,
+                original_file_path,
+            } => {
+                format!(" (patch_path: {patch_path}, original_file_path: {original_file_path})")
+            }
+            _ => String::new(),
+        };
+        write!(f, "{}{}", self.as_ref(), extra_info)
     }
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct ColumnFailure {
+#[derive(Debug, Clone, AsRefStr, PartialEq, Eq)]
+pub enum ColumnFailure {
+    DescriptionMissing,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ColumnResult {
     pub column_name: String,
-    pub description_missing: bool,
-}
-
-impl Display for ColumnFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "  - {}", self.summary())
-    }
-}
-
-impl ColumnFailure {
-    pub fn summary(&self) -> String {
-        if self.description_missing {
-            format!("Column `{}`: Missing Description", self.column_name)
-        } else {
-            format!("Column `{}`: Validation failed", self.column_name)
-        }
-    }
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct ColumnSuccess {
-    pub column_name: String,
+    pub failures: Vec<ColumnFailure>,
     pub change: Option<ColumnChanges>,
 }
 
-#[derive(Debug, Clone)]
-pub enum ColumnResult {
-    Pass(ColumnSuccess),
-    Fail(ColumnFailure),
-}
-
 impl ColumnResult {
+    pub fn is_pass(&self) -> bool {
+        self.failures.is_empty()
+    }
+
+    pub fn is_failure(&self) -> bool {
+        !self.is_pass()
+    }
+
     pub fn change(&self) -> Option<&ColumnChanges> {
-        match self {
-            ColumnResult::Pass(success) => success.change.as_ref(),
-            ColumnResult::Fail(_) => None,
-        }
+        self.change.as_ref()
+    }
+
+    pub fn failure_reasons(&self) -> Vec<String> {
+        self.failures
+            .iter()
+            .map(|failure| match failure {
+                ColumnFailure::DescriptionMissing => {
+                    format!("Column `{}`: Missing Description", self.column_name)
+                }
+            })
+            .collect()
     }
 }
 
@@ -133,43 +105,58 @@ pub struct ColumnChanges {
     pub new_description: Option<String>,
 }
 
-#[derive(Default, Debug)]
-pub struct ModelSuccess {
+#[derive(Debug, Clone, Default)]
+pub struct ModelResult {
     pub model_id: String,
+    pub failures: Vec<ModelFailure>,
     pub column_results: BTreeMap<String, ColumnResult>,
     pub changes: Option<ModelChanges>,
 }
 
-#[derive(Debug)]
-pub enum ModelResult {
-    Pass(ModelSuccess),
-    Fail(ModelFailure),
-}
-
 impl ModelResult {
     pub fn model_id(&self) -> &str {
-        match self {
-            ModelResult::Pass(success) => &success.model_id,
-            ModelResult::Fail(failure) => &failure.model_id,
-        }
+        &self.model_id
     }
 
     pub fn changes(&self) -> Option<&ModelChanges> {
-        match self {
-            ModelResult::Pass(success) => success.changes.as_ref(),
-            ModelResult::Fail(failure) => failure.changes.as_ref(),
-        }
+        self.changes.as_ref()
+    }
+
+    pub fn failures(&self) -> &[ModelFailure] {
+        &self.failures
+    }
+
+    pub fn has_column_failures(&self) -> bool {
+        self.column_results.values().any(ColumnResult::is_failure)
+    }
+
+    pub fn is_pass(&self) -> bool {
+        self.failures.is_empty() && !self.has_column_failures()
     }
 
     pub fn is_failure(&self) -> bool {
-        matches!(self, ModelResult::Fail(_))
+        !self.is_pass()
     }
 
-    pub fn as_failure(&self) -> Option<&ModelFailure> {
-        if let ModelResult::Fail(failure) = self {
-            Some(failure)
+    pub fn failure_reasons(&self) -> Vec<String> {
+        let mut reasons: Vec<String> = self.failures.iter().map(ToString::to_string).collect();
+        for column_result in self.column_results.values() {
+            reasons.extend(column_result.failure_reasons());
+        }
+        reasons
+    }
+}
+
+impl Display for ModelResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_pass() {
+            write!(f, "ModelResult: Pass:{}", self.model_id)
         } else {
-            None
+            writeln!(f, "ModelResult: Fail:{}", self.model_id)?;
+            for reason in self.failure_reasons() {
+                writeln!(f, "    {reason}")?;
+            }
+            Ok(())
         }
     }
 }
@@ -181,40 +168,55 @@ pub(crate) fn check_model(
     config: &Config,
 ) -> ModelResult {
     let Some(node @ DbtNode::Model(model_meta)) = manifest.nodes.get(model_id) else {
-        return ModelResult::Pass(ModelSuccess {
+        return ModelResult {
             model_id: model_id.to_string(),
-            column_results: BTreeMap::new(),
-            changes: None,
-        });
+            ..Default::default()
+        };
     };
 
     let model_unique_id = model_meta.__common_attr__.unique_id.clone();
     let patch_path = model_meta.__common_attr__.patch_path.clone();
     let _model_type = model_type(model_meta); // currently unused
 
-    let description_missing = config.select.contains(&Selector::MissingModelDescriptions)
-        && model_meta.__common_attr__.description.is_none();
-    let tags_missing =
-        config.select.contains(&Selector::MissingModelTags) && model_meta.config.tags.is_none();
-
-    let is_direct_join_to_source =
-        config.select.contains(&Selector::DirectJoinToSource) && direct_join_to_source(model_meta);
-    let is_missing_properties_file =
-        config.select.contains(&Selector::MissingPropertiesFile) && missing_properties_file(node);
-    let is_model_fanout = model_fanout(manifest, model_id, config);
-    let is_missing_required_tests = missing_required_tests(manifest, model_meta, config);
-    let is_root_model = root_model(model_meta, config);
-    let is_missing_primary_key = missing_primary_key(model_meta, config);
-    let is_multiple_sources_joined = multiple_sources_joined(model_meta, config);
-    let is_rejoining_of_upstream_concepts =
-        rejoining_of_upstream_concepts(manifest, model_meta, config);
-    let is_public_model_without_contract = public_model_without_contract(model_meta, config);
-    let is_model_separate_from_properties_file = node_separate_from_properties_file(node);
+    let mut failures: Vec<ModelFailure> = Vec::new();
+    if let Some(f) = missing_model_description(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = missing_model_tags(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = direct_join_to_source(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = missing_properties_file(node, config) {
+        failures.push(f)
+    }
+    if let Some(f) = model_fanout(manifest, model_id, config) {
+        failures.push(f)
+    }
+    if let Some(f) = missing_required_tests(manifest, model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = root_model(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = missing_primary_key(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = multiple_sources_joined(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = rejoining_of_upstream_concepts(manifest, model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = public_model_without_contract(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = model_separate_from_properties_file(node, config) {
+        failures.push(f)
+    }
 
     let column_results = check_model_columns(manifest, model_id, prior_changes, config);
-    let has_column_failures = column_results
-        .values()
-        .any(|result| matches!(result, ColumnResult::Fail(_)));
 
     let mut column_changes: BTreeMap<String, BTreeSet<ColumnChanges>> = BTreeMap::new();
     for (column_name, column_result) in &column_results {
@@ -236,86 +238,92 @@ pub(crate) fn check_model(
         })
     };
 
-    if description_missing
-        || tags_missing
-        || has_column_failures
-        || is_direct_join_to_source
-        || is_missing_properties_file
-        || is_model_fanout
-        || is_missing_required_tests
-        || is_root_model
-        || is_missing_primary_key
-        || is_multiple_sources_joined
-        || is_rejoining_of_upstream_concepts
-        || is_public_model_without_contract
-        || is_model_separate_from_properties_file
-    {
-        ModelResult::Fail(ModelFailure {
-            model_id: model_unique_id,
-            description_missing,
-            tags_missing,
-            is_direct_join_to_source,
-            is_missing_properties_file,
-            is_model_fanout,
-            is_missing_required_tests,
-            is_root_model,
-            is_missing_primary_key,
-            is_multiple_sources_joined,
-            is_rejoining_of_upstream_concepts,
-            is_public_model_without_contract,
-            is_model_separate_from_properties_file,
-            column_results,
-            changes,
-        })
-    } else {
-        ModelResult::Pass(ModelSuccess {
-            model_id: model_unique_id,
-            column_results,
-            changes,
-        })
+    ModelResult {
+        model_id: model_unique_id,
+        failures,
+        column_results,
+        changes,
     }
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
-fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> bool {
-    if !config.select.contains(&Selector::MultipleSourcesJoined) {
-        return false;
+fn missing_model_description(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
+    if !config.select.contains(&Selector::MissingModelDescriptions) {
+        return None;
     }
-    let source_dependencies = model
+    (model.__common_attr__.description.is_none()).then_some(ModelFailure::DescriptionMissing)
+}
+
+fn missing_model_tags(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
+    if !config.select.contains(&Selector::MissingModelTags) {
+        return None;
+    }
+    (model.config.tags.is_none()).then_some(ModelFailure::TagsMissing(Vec::new()))
+}
+
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
+fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
+    if !config.select.contains(&Selector::MultipleSourcesJoined) {
+        return None;
+    }
+    let sources: Vec<String> = model
         .__base_attr__
         .depends_on
         .nodes
         .iter()
         .filter(|upstream_id| upstream_id.starts_with("source."))
-        .count();
-    source_dependencies > 1
+        .cloned()
+        .collect();
+    if sources.len() > 1 {
+        Some(ModelFailure::MultipleSourcesJoined(sources))
+    } else {
+        None
+    }
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#direct-join-to-source
-fn direct_join_to_source(model: &ManifestModel) -> bool {
+fn direct_join_to_source(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
+    if !config.select.contains(&Selector::DirectJoinToSource) {
+        return None;
+    }
     let depends_on = &model.__base_attr__.depends_on.nodes;
     if depends_on.len() < 2 {
-        return false;
+        return None;
     }
-    depends_on
+    let sources: Vec<String> = depends_on
         .iter()
-        .any(|upstream_id| upstream_id.starts_with("source."))
+        .filter(|upstream_id| upstream_id.starts_with("source."))
+        .cloned()
+        .collect();
+    if sources.is_empty() {
+        None
+    } else {
+        Some(ModelFailure::DirectJoinToSource(sources))
+    }
 }
 
-fn missing_properties_file(node: &DbtNode) -> bool {
-    match node {
+fn missing_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailure> {
+    if !config.select.contains(&Selector::MissingPropertiesFile) {
+        return None;
+    }
+    let missing_patch = match node {
         DbtNode::Model(model) => model.__common_attr__.patch_path.is_none(),
         DbtNode::Seed(seed) => seed.__common_attr__.patch_path.is_none(),
         DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.is_none(),
         _ => false,
-    }
+    };
+    missing_patch.then_some(ModelFailure::MissingPropertiesFile)
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
 /// snapshots are not counted in fanout
-fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> bool {
+fn model_fanout(
+    manifest: &DbtManifestV12,
+    model_id: &str,
+    config: &Config,
+) -> Option<ModelFailure> {
     if !config.select.contains(&Selector::ModelFanout) {
-        return false;
+        return None;
     }
     let downstream_models = manifest
         .child_map
@@ -325,44 +333,54 @@ fn model_fanout(manifest: &DbtManifestV12, model_id: &str, config: &Config) -> b
         .filter(|id| id.starts_with("model."))
         .count();
 
-    downstream_models > config.model_fanout_threshold
+    (downstream_models > config.model_fanout_threshold)
+        .then_some(ModelFailure::ModelFanout(downstream_models))
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#root-models
-fn root_model(model: &ManifestModel, config: &Config) -> bool {
+fn root_model(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
     if !config.select.contains(&Selector::RootModels) {
-        return false;
+        return None;
     }
-    model.__base_attr__.depends_on.nodes.is_empty()
+    (model.__base_attr__.depends_on.nodes.is_empty()).then_some(ModelFailure::RootModel)
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-primary-key-tests
-fn missing_primary_key(model: &ManifestModel, config: &Config) -> bool {
-    // We're going to trust that the primary key is defined correctly in the manifest
+fn missing_primary_key(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
     if !config.select.contains(&Selector::MissingPrimaryKey) {
-        return false;
+        return None;
     }
-    model.primary_key.as_ref().unwrap_or(&vec![]).is_empty()
+    let missing_pk = model.primary_key.as_ref().unwrap_or(&vec![]).is_empty();
+    missing_pk.then_some(ModelFailure::MissingPrimaryKey)
 }
 
-fn node_separate_from_properties_file(node: &DbtNode) -> bool {
+fn model_separate_from_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailure> {
+    if !config
+        .select
+        .contains(&Selector::ModelsSeparateFromPropertiesFile)
+    {
+        return None;
+    }
     let patch_path = match node {
         DbtNode::Model(model) => model.__common_attr__.patch_path.as_ref(),
         DbtNode::Seed(seed) => seed.__common_attr__.patch_path.as_ref(),
         DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.as_ref(),
-        _ => return false,
-    };
-    let Some(patch_path) = patch_path else {
-        return false;
-    };
+        _ => return None,
+    }?;
 
     let original_path = match node {
         DbtNode::Model(model) => &model.__common_attr__.original_file_path,
         DbtNode::Seed(seed) => &seed.__common_attr__.original_file_path,
         DbtNode::Snapshot(snap) => &snap.__common_attr__.original_file_path,
-        _ => return false, // redundant
+        _ => return None,
     };
-    patch_path.parent() != original_path.parent()
+
+    (patch_path.parent() != original_path.parent()).then_some(
+        ModelFailure::ModelSeparateFromPropertiesFile {
+            patch_path: patch_path.display().to_string(),
+            original_file_path: original_path.display().to_string(),
+        },
+    )
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#rejoining-of-upstream-concepts
@@ -370,48 +388,58 @@ fn rejoining_of_upstream_concepts(
     manifest: &DbtManifestV12,
     model: &ManifestModel,
     config: &Config,
-) -> bool {
-    // TODO: make this return better than a bool
+) -> Option<ModelFailure> {
     if !config
         .select
         .contains(&Selector::RejoiningOfUpstreamConcepts)
     {
-        return false;
+        return None;
     }
     let base_dependencies = &model.__base_attr__.depends_on.nodes;
+
+    let mut rejoined: BTreeSet<String> = BTreeSet::new();
 
     for upstream_id in base_dependencies {
         if let Some(DbtNode::Model(upstream_model)) = manifest.nodes.get(upstream_id) {
             let upstream_dependencies = &upstream_model.__base_attr__.depends_on.nodes;
             for dep in upstream_dependencies {
                 if base_dependencies.contains(dep) {
-                    return true;
+                    rejoined.insert(dep.clone());
                 }
             }
         }
     }
 
-    false
+    if rejoined.is_empty() {
+        None
+    } else {
+        Some(ModelFailure::RejoiningOfUpstreamConcepts(
+            rejoined.into_iter().collect(),
+        ))
+    }
 }
 
-fn public_model_without_contract(model: &ManifestModel, config: &Config) -> bool {
+fn public_model_without_contract(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
     if !config
         .select
         .contains(&Selector::PublicModelsWithoutContract)
     {
-        return false;
+        return None;
     }
-    is_public_model(model) && !model.__base_attr__.contract.enforced
+    if is_public_model(model) && !model.__base_attr__.contract.enforced {
+        Some(ModelFailure::PublicModelWithoutContract)
+    } else {
+        None
+    }
 }
 
 fn missing_required_tests(
     manifest: &DbtManifestV12,
     model: &ManifestModel,
     config: &Config,
-) -> bool {
-    // for now just check if it has ANY of the required tests
+) -> Option<ModelFailure> {
     if config.required_tests.is_empty() {
-        return false;
+        return None;
     }
 
     let existing_tests: Vec<String> = manifest
@@ -420,8 +448,6 @@ fn missing_required_tests(
         .into_iter()
         .flat_map(|children| children.iter())
         .filter(|id| id.starts_with("test."))
-        // getting the test_ids from child_map is not enough, need to get the actual test names
-        // those are in the manifest nodes themselves
         .filter_map(|test_id| {
             manifest.nodes.get(test_id).and_then(|node| match node {
                 DbtNode::Test(test) => Some(test.test_metadata.as_ref()?.name.clone()),
@@ -433,7 +459,9 @@ fn missing_required_tests(
         .iter()
         .any(|test_name| config.required_tests.contains(test_name));
 
-    !has_required_test
+    (!has_required_test).then_some(ModelFailure::MissingRequiredTests(
+        config.required_tests.clone(),
+    ))
 }
 
 fn check_model_columns(
@@ -481,10 +509,11 @@ fn check_model_columns(
         if !config.pull_column_desc_from_upstream {
             results.insert(
                 col_name.clone(),
-                ColumnResult::Fail(ColumnFailure {
+                ColumnResult {
                     column_name: col_name.clone(),
-                    description_missing: true,
-                }),
+                    failures: vec![ColumnFailure::DescriptionMissing],
+                    change: None,
+                },
             );
             continue;
         }
@@ -504,19 +533,21 @@ fn check_model_columns(
 
                 results.insert(
                     col_name.clone(),
-                    ColumnResult::Pass(ColumnSuccess {
+                    ColumnResult {
                         column_name: col_name.clone(),
+                        failures: Vec::new(),
                         change,
-                    }),
+                    },
                 );
             }
             None => {
                 results.insert(
                     col_name.clone(),
-                    ColumnResult::Fail(ColumnFailure {
+                    ColumnResult {
                         column_name: col_name.clone(),
-                        description_missing: true,
-                    }),
+                        failures: vec![ColumnFailure::DescriptionMissing],
+                        change: None,
+                    },
                 );
             }
         }
@@ -616,18 +647,21 @@ mod tests {
             .cloned()
             .expect("expected column changes to be recorded");
 
-        let failure = match model_result {
-            ModelResult::Fail(failure) => failure,
-            ModelResult::Pass(_) => panic!("expected model failure to be recorded"),
-        };
-
         assert!(
-            failure
+            model_result.is_failure(),
+            "model should be marked as failure"
+        );
+        assert!(
+            model_result
+                .failures()
+                .contains(&ModelFailure::DescriptionMissing)
+        );
+        assert!(
+            model_result
                 .column_results
                 .values()
-                .all(|result| matches!(result, ColumnResult::Pass(_)))
+                .all(ColumnResult::is_pass)
         );
-        assert!(failure.description_missing);
         assert_eq!(changes.model_id, "model.test.downstream");
         let column_set = changes
             .column_changes
@@ -639,16 +673,13 @@ mod tests {
             Some("Upstream description")
         );
 
-        let column_result = failure
+        let column_result = model_result
             .column_results
             .get("customer_id")
             .expect("customer_id column should be present");
-        let ColumnResult::Pass(success) = column_result else {
-            panic!("expected column to pass");
-        };
-        let change = success
-            .change
-            .as_ref()
+        assert!(column_result.is_pass(), "expected column to pass");
+        let change = column_result
+            .change()
             .expect("expected change entry for column");
         assert_eq!(
             change.new_description.as_deref(),
@@ -680,7 +711,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(missing_required_tests(&manifest, model, &config));
+        assert!(missing_required_tests(&manifest, model, &config).is_some());
     }
 
     #[test]
@@ -692,7 +723,8 @@ mod tests {
             "model.test.upstream".to_string(),
             "source.test.raw_layer.orders".to_string(),
         ];
-        assert!(direct_join_to_source(&model));
+        let config = Config::default();
+        assert!(direct_join_to_source(&model, &config).is_some());
     }
 
     #[test]
@@ -701,7 +733,8 @@ mod tests {
 
         model.__common_attr__.unique_id = "model.test.target".to_string();
         model.__base_attr__.depends_on.nodes = vec!["source.test.raw_layer.orders".to_string()];
-        assert!(!direct_join_to_source(&model));
+        let config = Config::default();
+        assert!(direct_join_to_source(&model, &config).is_none());
     }
 
     #[test]
@@ -713,7 +746,8 @@ mod tests {
             "model.test.upstream".to_string(),
             "model.test.another_upstream".to_string(),
         ];
-        assert!(!direct_join_to_source(&model));
+        let config = Config::default();
+        assert!(direct_join_to_source(&model, &config).is_none());
     }
 
     #[test]
@@ -748,15 +782,15 @@ mod tests {
         };
 
         assert!(
-            !model_fanout(&manifest, "model.test.one_model", &config),
+            model_fanout(&manifest, "model.test.one_model", &config).is_none(),
             "only 1 downstream"
         );
         assert!(
-            !model_fanout(&manifest, "model.test.lots_of_tests", &config),
+            model_fanout(&manifest, "model.test.lots_of_tests", &config).is_none(),
             "lots of tests should not trigger"
         );
         assert!(
-            model_fanout(&manifest, "model.test.four_models", &config),
+            model_fanout(&manifest, "model.test.four_models", &config).is_some(),
             "4 models exceeds threshold of 1"
         );
     }
@@ -770,7 +804,7 @@ mod tests {
             _ => panic!("expected model node"),
         };
         let config = Config::default();
-        assert!(root_model(model, &config));
+        assert!(root_model(model, &config).is_some());
     }
 
     #[test]
@@ -784,7 +818,7 @@ mod tests {
         ];
         let config = Config::default();
         assert!(
-            multiple_sources_joined(&model, &config),
+            multiple_sources_joined(&model, &config).is_some(),
             "2 sources should trigger"
         );
     }
@@ -827,9 +861,7 @@ mod tests {
             panic!("expected downstream model");
         };
         let config = Config::default();
-        assert!(rejoining_of_upstream_concepts(
-            &manifest, downstream, &config
-        ));
+        assert!(rejoining_of_upstream_concepts(&manifest, downstream, &config).is_some());
     }
 
     #[test]
@@ -838,7 +870,7 @@ mod tests {
         model.__common_attr__.unique_id = "model.test".to_string();
         model.primary_key = Some(vec![]);
         let config = Config::default();
-        assert!(missing_primary_key(&model, &config));
+        assert!(missing_primary_key(&model, &config).is_some());
     }
 
     #[test]
@@ -846,7 +878,7 @@ mod tests {
         let mut model = ManifestModel::default();
         model.__common_attr__.patch_path = None;
         let node = DbtNode::Model(model);
-        assert!(missing_properties_file(&node));
+        assert!(missing_properties_file(&node, &Config::default()).is_some());
     }
 
     #[test]
@@ -859,6 +891,6 @@ mod tests {
             select: vec![Selector::PublicModelsWithoutContract],
             ..Default::default()
         };
-        assert!(public_model_without_contract(&model, &config));
+        assert!(public_model_without_contract(&model, &config).is_some());
     }
 }

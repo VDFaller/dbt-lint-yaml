@@ -1,6 +1,6 @@
 use clap::Parser;
 use dbt_lint_yaml::{
-    check::{CheckEvent, ModelResult, SourceResult, check_all_with_report},
+    check::{CheckEvent, check_all_with_report},
     config::Config,
     writeback,
 };
@@ -112,26 +112,31 @@ impl TypecheckingEventListener for NullTypecheckingEventListener {
 
 fn report_event(event: CheckEvent<'_>, verbose: bool) {
     match event {
-        CheckEvent::Model(ModelResult::Pass(success)) => {
-            if verbose {
-                println!("\x1b[32msuccess:\x1b[0m {} passed", success.model_id);
+        CheckEvent::Model(model_result) => {
+            if model_result.is_pass() {
+                if verbose {
+                    println!("\x1b[32msuccess:\x1b[0m {} passed", model_result.model_id());
+                }
+            } else {
+                println!("\x1b[31merror:\x1b[0m {} failed", model_result.model_id());
+                for reason in model_result.failure_reasons() {
+                    println!("    * {reason}");
+                }
             }
         }
-        CheckEvent::Model(ModelResult::Fail(failure)) => {
-            println!("\x1b[31merror:\x1b[0m {} failed", failure.model_id);
-            for reason in failure.failure_reasons() {
-                println!("    * {reason}");
-            }
-        }
-        CheckEvent::Source(SourceResult::Pass(success)) => {
-            if verbose {
-                println!("\x1b[32msuccess:\x1b[0m {} passed", success.source_id);
-            }
-        }
-        CheckEvent::Source(SourceResult::Fail(failure)) => {
-            println!("\x1b[31merror:\x1b[0m {} failed", failure.source_id);
-            for reason in failure.failure_reasons() {
-                println!("    * {reason}");
+        CheckEvent::Source(source_result) => {
+            if source_result.is_pass() {
+                if verbose {
+                    println!(
+                        "\x1b[32msuccess:\x1b[0m {} passed",
+                        source_result.source_id()
+                    );
+                }
+            } else {
+                println!("\x1b[31merror:\x1b[0m {} failed", source_result.source_id());
+                for reason in source_result.failure_reasons() {
+                    println!("    * {reason}");
+                }
             }
         }
     }
