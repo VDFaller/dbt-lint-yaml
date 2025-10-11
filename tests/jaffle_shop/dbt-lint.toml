@@ -1,4 +1,4 @@
 exclude = ["missing_model_tags"]
-pull_column_desc_from_upstream = false
+unfixable = ["missing_column_descriptions"]
 model_fanout_threshold = 3
 required_tests = []

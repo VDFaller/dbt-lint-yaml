@@ -14,7 +14,12 @@ select = [
     "missing_source_freshness",
     "multiple_sources_joined",
     "rejoining_of_upstream_concepts",
+    "source_fanout",
+    "public_models_without_contract",
+    "models_separate_from_properties_file",
 ]
-pull_column_desc_from_upstream = true
+exclude = []
+fixable = ["missing_column_descriptions"]
+unfixable = []
 model_fanout_threshold = 3
 required_tests = []
