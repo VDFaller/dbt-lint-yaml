@@ -103,10 +103,7 @@ fn missing_source_table_description(
     source: &ManifestSource,
     config: &Config,
 ) -> Option<SourceFailure> {
-    if !config
-        .select
-        .contains(&Selector::MissingSourceTableDescriptions)
-    {
+    if !config.is_selected(Selector::MissingSourceTableDescriptions) {
         return None;
     }
     (source.__common_attr__.description.is_none()).then_some(SourceFailure::MissingDescription)
@@ -114,7 +111,7 @@ fn missing_source_table_description(
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/documentation/#undocumented-sources
 fn missing_source_description(source: &ManifestSource, config: &Config) -> Option<SourceFailure> {
-    if !config.select.contains(&Selector::MissingSourceDescriptions) {
+    if !config.is_selected(Selector::MissingSourceDescriptions) {
         return None;
     }
     (source.source_description.is_empty()).then_some(SourceFailure::MissingSourceDescription)
@@ -126,7 +123,7 @@ fn source_fanout(
     source: &ManifestSource,
     config: &Config,
 ) -> Option<SourceFailure> {
-    if !config.select.contains(&Selector::SourceFanout) {
+    if !config.is_selected(Selector::SourceFanout) {
         return None;
     }
 
@@ -145,7 +142,7 @@ fn duplicate_source(
     source: &ManifestSource,
     config: &Config,
 ) -> Option<SourceFailure> {
-    if !config.select.contains(&Selector::DuplicateSources)
+    if !config.is_selected(Selector::DuplicateSources)
         || source.__common_attr__.name == source.identifier
     {
         return None;
@@ -169,7 +166,7 @@ fn unused_source(
     config: &Config,
 ) -> Option<SourceFailure> {
     // A source is considered "used" if any model depends on it
-    if !config.select.contains(&Selector::UnusedSources) {
+    if !config.is_selected(Selector::UnusedSources) {
         return None;
     }
     let has_downstream = manifest
@@ -183,7 +180,7 @@ fn unused_source(
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-source-freshness
 fn missing_source_freshness(source: &ManifestSource, config: &Config) -> Option<SourceFailure> {
-    if !config.select.contains(&Selector::MissingSourceFreshness) {
+    if !config.is_selected(Selector::MissingSourceFreshness) {
         return None;
     }
     if let Some(freshness) = &source.freshness {

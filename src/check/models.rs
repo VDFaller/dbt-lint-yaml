@@ -248,14 +248,14 @@ pub(crate) fn check_model(
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
 fn missing_model_description(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::MissingModelDescriptions) {
+    if !config.is_selected(Selector::MissingModelDescriptions) {
         return None;
     }
     (model.__common_attr__.description.is_none()).then_some(ModelFailure::DescriptionMissing)
 }
 
 fn missing_model_tags(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::MissingModelTags) {
+    if !config.is_selected(Selector::MissingModelTags) {
         return None;
     }
     (model.config.tags.is_none()).then_some(ModelFailure::TagsMissing(Vec::new()))
@@ -263,7 +263,7 @@ fn missing_model_tags(model: &ManifestModel, config: &Config) -> Option<ModelFai
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
 fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::MultipleSourcesJoined) {
+    if !config.is_selected(Selector::MultipleSourcesJoined) {
         return None;
     }
     let sources: Vec<String> = model
@@ -283,7 +283,7 @@ fn multiple_sources_joined(model: &ManifestModel, config: &Config) -> Option<Mod
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#direct-join-to-source
 fn direct_join_to_source(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::DirectJoinToSource) {
+    if !config.is_selected(Selector::DirectJoinToSource) {
         return None;
     }
     let depends_on = &model.__base_attr__.depends_on.nodes;
@@ -303,7 +303,7 @@ fn direct_join_to_source(model: &ManifestModel, config: &Config) -> Option<Model
 }
 
 fn missing_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::MissingPropertiesFile) {
+    if !config.is_selected(Selector::MissingPropertiesFile) {
         return None;
     }
     let missing_patch = match node {
@@ -322,7 +322,7 @@ fn model_fanout(
     model_id: &str,
     config: &Config,
 ) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::ModelFanout) {
+    if !config.is_selected(Selector::ModelFanout) {
         return None;
     }
     let downstream_models = manifest
@@ -339,7 +339,7 @@ fn model_fanout(
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#root-models
 fn root_model(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::RootModels) {
+    if !config.is_selected(Selector::RootModels) {
         return None;
     }
     (model.__base_attr__.depends_on.nodes.is_empty()).then_some(ModelFailure::RootModel)
@@ -347,7 +347,7 @@ fn root_model(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-primary-key-tests
 fn missing_primary_key(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
-    if !config.select.contains(&Selector::MissingPrimaryKey) {
+    if !config.is_selected(Selector::MissingPrimaryKey) {
         return None;
     }
     let missing_pk = model.primary_key.as_ref().unwrap_or(&vec![]).is_empty();
@@ -355,10 +355,7 @@ fn missing_primary_key(model: &ManifestModel, config: &Config) -> Option<ModelFa
 }
 
 fn model_separate_from_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailure> {
-    if !config
-        .select
-        .contains(&Selector::ModelsSeparateFromPropertiesFile)
-    {
+    if !config.is_selected(Selector::ModelsSeparateFromPropertiesFile) {
         return None;
     }
     let patch_path = match node {
@@ -389,10 +386,7 @@ fn rejoining_of_upstream_concepts(
     model: &ManifestModel,
     config: &Config,
 ) -> Option<ModelFailure> {
-    if !config
-        .select
-        .contains(&Selector::RejoiningOfUpstreamConcepts)
-    {
+    if !config.is_selected(Selector::RejoiningOfUpstreamConcepts) {
         return None;
     }
     let base_dependencies = &model.__base_attr__.depends_on.nodes;
@@ -420,10 +414,7 @@ fn rejoining_of_upstream_concepts(
 }
 
 fn public_model_without_contract(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
-    if !config
-        .select
-        .contains(&Selector::PublicModelsWithoutContract)
-    {
+    if !config.is_selected(Selector::PublicModelsWithoutContract) {
         return None;
     }
     if is_public_model(model) && !model.__base_attr__.contract.enforced {
@@ -471,7 +462,7 @@ fn check_model_columns(
     config: &Config,
 ) -> BTreeMap<String, ColumnResult> {
     let mut results: BTreeMap<String, ColumnResult> = BTreeMap::new();
-    if !config.select.contains(&Selector::MissingColumnDescriptions) {
+    if !config.is_selected(Selector::MissingColumnDescriptions) {
         return results;
     }
 

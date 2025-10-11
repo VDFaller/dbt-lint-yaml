@@ -46,6 +46,8 @@ pub enum ConfigError {
 pub struct Config {
     #[serde(default = "default_select")]
     pub select: Vec<Selector>,
+    #[serde(default = "default_exclude")]
+    pub exclude: Vec<Selector>,
     #[serde(default = "default_pull_column_desc_from_upstream")]
     pub pull_column_desc_from_upstream: bool,
     #[serde(default = "default_model_fanout_threshold")]
@@ -61,6 +63,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             select: default_select(),
+            exclude: default_exclude(),
             pull_column_desc_from_upstream: default_pull_column_desc_from_upstream(),
             model_fanout_threshold: default_model_fanout_threshold(),
             required_tests: Vec::new(),
@@ -69,6 +72,10 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn is_selected(&self, selector: Selector) -> bool {
+        self.select.contains(&selector) && !self.exclude.contains(&selector)
+    }
+
     pub fn from_toml(project_dir: &std::path::Path) -> Self {
         let config_path = project_dir.join("dbt-lint.toml");
         if config_path.exists() {
@@ -106,6 +113,10 @@ impl Config {
 
 fn default_select() -> Vec<Selector> {
     Selector::iter().collect()
+}
+
+fn default_exclude() -> Vec<Selector> {
+    Vec::new()
 }
 
 fn default_pull_column_desc_from_upstream() -> bool {
@@ -160,6 +171,7 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert_eq!(config.select, default_select());
+        assert_eq!(config.exclude, default_exclude());
         assert_eq!(
             config.pull_column_desc_from_upstream,
             default_pull_column_desc_from_upstream()
@@ -168,6 +180,7 @@ mod tests {
             config.model_fanout_threshold,
             default_model_fanout_threshold()
         );
+        assert!(config.is_selected(Selector::MissingColumnDescriptions));
     }
 
     #[test]
@@ -185,8 +198,21 @@ mod tests {
                 Selector::MissingModelTags
             ]
         );
+        assert!(config.exclude.is_empty());
         assert!(!config.pull_column_desc_from_upstream);
         assert_eq!(config.model_fanout_threshold, 4);
+    }
+
+    #[test]
+    fn test_exclude_overrides_select() {
+        let toml_str = r#"
+            select = ["missing_model_tags"]
+            exclude = ["missing_model_tags"]
+        "#;
+        let config = Config::from_toml_str(toml_str);
+        assert_eq!(config.select, vec![Selector::MissingModelTags]);
+        assert_eq!(config.exclude, vec![Selector::MissingModelTags]);
+        assert!(!config.is_selected(Selector::MissingModelTags));
     }
 
     #[test]
