@@ -79,6 +79,8 @@ pub struct Config {
     pub model_fanout_threshold: usize,
     #[serde(default)]
     pub required_tests: Vec<String>,
+    #[serde(default)]
+    pub render_descriptions: bool,
 }
 
 impl Default for Config {
@@ -91,6 +93,7 @@ impl Default for Config {
             fix: false,
             model_fanout_threshold: default_model_fanout_threshold(),
             required_tests: Vec::new(),
+            render_descriptions: false,
         }
     }
 }
