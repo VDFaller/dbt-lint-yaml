@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:16-alpine # Using a lightweight Alpine-based PostgreSQL image
+    restart: always
+    environment:
+      POSTGRES_DB: public
+      POSTGRES_USER: letsgo
+      POSTGRES_PASSWORD: aaaabbbb
+    ports:
+      - "5432:5432" # Map host port 5432 to container port 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persistent data storage
+      # - ./initdb:/docker-entrypoint-initdb.d # Optional: for initial database setup scripts
+volumes:
+  postgres_data:
