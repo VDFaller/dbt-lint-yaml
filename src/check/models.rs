@@ -247,6 +247,7 @@ fn check_model_column(
             Some(prior_changes),
             &model.__common_attr__.unique_id,
             column.name.as_str(),
+            config,
         ) {
             let old_description = column.description.clone();
             let new_description = Some(new_description);

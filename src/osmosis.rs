@@ -1,4 +1,7 @@
-use crate::check::{ColumnChange, ModelChanges};
+use crate::{
+    check::{ColumnChange, ModelChanges},
+    config::Config,
+};
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::BTreeMap;
 
@@ -7,6 +10,7 @@ pub(crate) fn get_upstream_col_desc(
     model_changes: Option<&BTreeMap<String, ModelChanges>>,
     node_id: &str,
     col_name: &str,
+    config: &Config,
 ) -> Option<String> {
     let upstream_ids = manifest.nodes.get(node_id).and_then(|node| match node {
         DbtNode::Model(model) => Some(model.__base_attr__.depends_on.nodes.clone()),
@@ -22,7 +26,7 @@ pub(crate) fn get_upstream_col_desc(
         }
     }
 
-    upstream_ids
+    let desc = upstream_ids
         .iter()
         .filter_map(|upstream_id| {
             // the upstream id can be a node or a source
@@ -49,7 +53,23 @@ pub(crate) fn get_upstream_col_desc(
                 })
         })
         .filter_map(|dep_col| dep_col.as_ref().description.as_ref().cloned())
-        .next()
+        .next();
+
+    if config.render_descriptions {
+        return desc;
+    }
+    // Prefer a docs block reference when the description matches exactly.
+    desc.map(|d| {
+        let doc_reference = manifest.docs.values().find_map(|doc| {
+            if doc.block_contents == d {
+                Some(format!("{{{{doc('{name}')}}}}", name = doc.name))
+            } else {
+                None
+            }
+        });
+
+        doc_reference.unwrap_or(d)
+    })
 }
 
 fn lookup_model_change_description(
@@ -71,7 +91,10 @@ fn lookup_model_change_description(
 #[cfg(test)]
 mod tests {
     use super::{get_upstream_col_desc, lookup_model_change_description};
-    use crate::check::{ColumnChange, ModelChanges};
+    use crate::{
+        check::{ColumnChange, ModelChanges},
+        config::Config,
+    };
     use dbt_schemas::schemas::{
         dbt_column::DbtColumn,
         manifest::{DbtManifestV12, DbtNode, ManifestSeed},
@@ -296,6 +319,7 @@ mod tests {
             Some(&model_changes_map),
             "model.jaffle_shop.orders",
             "customer_id",
+            &Config::default(),
         );
 
         assert_eq!(result.as_deref(), Some("Fresh description"));
@@ -305,8 +329,13 @@ mod tests {
     fn returns_description_from_upstream_model_column() {
         let manifest = manifest_fixture();
 
-        let result =
-            get_upstream_col_desc(&manifest, None, "model.jaffle_shop.orders", "customer_id");
+        let result = get_upstream_col_desc(
+            &manifest,
+            None,
+            "model.jaffle_shop.orders",
+            "customer_id",
+            &Config::default(),
+        );
 
         assert_eq!(result.as_deref(), Some("Customer id from manifest"));
     }
@@ -320,6 +349,7 @@ mod tests {
             None,
             "model.jaffle_shop.base_customers",
             "customer_id",
+            &Config::default(),
         );
 
         assert_eq!(result.as_deref(), Some("Customer id from source"));
@@ -335,6 +365,7 @@ mod tests {
             Some(&model_changes_map),
             "model.jaffle_shop.payments",
             "payment_id",
+            &Config::default(),
         );
 
         assert!(result.is_none());
