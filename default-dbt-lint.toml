@@ -24,3 +24,4 @@ unfixable = []
 model_fanout_threshold = 3
 required_tests = []
 render_descriptions = false
+writeback = "python"
