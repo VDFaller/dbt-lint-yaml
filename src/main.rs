@@ -1,6 +1,7 @@
 use clap::Parser;
 use dbt_lint_yaml::{
-    check::{CheckEvent, ColumnChange, check_all_with_report},
+    change_descriptors::ColumnChange,
+    check::{CheckEvent, check_all_with_report},
     config::Config,
     writeback,
 };

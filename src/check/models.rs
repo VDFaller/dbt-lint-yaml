@@ -1,5 +1,6 @@
 use super::RuleOutcome;
-use super::columns::{self, ColumnChange, ColumnFailure, ColumnResult};
+use super::columns::{self, ColumnFailure, ColumnResult};
+use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
 use crate::{
     config::{Config, Selector},
     osmosis::get_upstream_col_desc,
@@ -62,21 +63,9 @@ impl Display for ModelFailure {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ModelChange {
-    MovePropertiesFile { new_path: PathBuf },
-    MoveModelFile { new_path: PathBuf },
-}
-
 type ModelRuleOutcome = RuleOutcome<ModelFailure, ModelChange>;
 
-#[derive(Default, Debug, Clone)]
-pub struct ModelChanges {
-    pub model_id: String,
-    pub patch_path: Option<PathBuf>,
-    pub changes: Vec<ModelChange>,
-    pub column_changes: BTreeMap<String, BTreeSet<ColumnChange>>,
-}
+// ModelChange and ModelChanges are defined in `crate::change_descriptors`.
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelResult {
@@ -252,7 +241,15 @@ fn check_model_column(
             let old_description = column.description.clone();
             let new_description = Some(new_description);
 
+            let model_id = model.__common_attr__.unique_id.clone();
+            let model_name = model_id.rsplit('.').next().unwrap_or(&model_id).to_string();
+            let patch_path = model.__common_attr__.patch_path.clone();
+
             changes.push(ColumnChange::DescriptionChanged {
+                model_id,
+                model_name,
+                patch_path,
+                column_name: column.name.clone(),
                 old: old_description,
                 new: new_description.clone(),
             });
@@ -411,7 +408,22 @@ fn model_separate_from_properties_file(node: &DbtNode, config: &Config) -> Model
         && let Some(file_name) = patch_path.file_name()
     {
         let new_path = original_parent.join(file_name);
-        return ModelRuleOutcome::Change(ModelChange::MovePropertiesFile { new_path });
+
+        // Extract model id and model name for the owning change variant
+        let model_id = match node {
+            DbtNode::Model(model) => model.__common_attr__.unique_id.clone(),
+            DbtNode::Seed(seed) => seed.__common_attr__.unique_id.clone(),
+            DbtNode::Snapshot(snap) => snap.__common_attr__.unique_id.clone(),
+            _ => String::new(),
+        };
+        let model_name = model_id.rsplit('.').next().unwrap_or(&model_id).to_string();
+
+        return ModelRuleOutcome::Change(ModelChange::MovePropertiesFile {
+            model_id,
+            model_name,
+            patch_path: Some(patch_path.to_path_buf()),
+            new_path,
+        });
     }
 
     ModelRuleOutcome::Fail(failure)

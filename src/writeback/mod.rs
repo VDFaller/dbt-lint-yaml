@@ -2,6 +2,8 @@ use crate::check::ModelChanges;
 use std::{collections::BTreeMap, path::Path};
 use thiserror::Error;
 
+pub mod changes;
+pub mod doc;
 pub mod python;
 pub mod rust;
 
@@ -21,6 +23,13 @@ pub enum WriteBackError {
     ResponseParseFailure(serde_json::Error),
     #[error("unsupported model change `{change}` for model `{model_id}`")]
     UnsupportedModelChange { model_id: String, change: String },
+    #[error("column `{column_name}` not found for model `{model_id}`")]
+    ColumnMissing {
+        model_id: String,
+        column_name: String,
+    },
+    #[error("model `{model_id}` not found in docs")]
+    ModelMissing { model_id: String },
     #[error("yaml error: {0}")]
     Yaml(#[from] dbt_serde_yaml::Error),
 }

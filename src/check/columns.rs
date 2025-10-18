@@ -1,3 +1,4 @@
+use crate::change_descriptors::ColumnChange;
 use dbt_schemas::schemas::dbt_column::DbtColumnRef;
 use strum::AsRefStr;
 
@@ -47,13 +48,8 @@ impl std::fmt::Display for ColumnResult {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ColumnChange {
-    DescriptionChanged {
-        old: Option<String>,
-        new: Option<String>,
-    },
-}
+// Column behavior and writeback wrapper are now centralized in
+// `crate::writeback::changes::ColumnChange` and `ExecutableColumnChange`.
 
 #[derive(Debug, Clone, Copy, AsRefStr, PartialEq, Eq)]
 pub enum ColumnFailure {

@@ -1,5 +1,5 @@
 use super::WriteBackError;
-use crate::check::{ColumnChange, ModelChange, ModelChanges};
+use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -56,7 +56,11 @@ pub fn apply_with_python(
 
         for change in &model_changes.changes {
             match change {
-                ModelChange::MovePropertiesFile { new_path } => {
+                ModelChange::MovePropertiesFile {
+                    patch_path: _cp,
+                    new_path,
+                    ..
+                } => {
                     let new_resolved_path = if new_path.is_absolute() {
                         new_path.clone()
                     } else {
