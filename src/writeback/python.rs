@@ -1,31 +1,12 @@
-use crate::check::{ColumnChange, ModelChange, ModelChanges};
+use super::WriteBackError;
+use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    env, fs,
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Stdio},
 };
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum WriteBackError {
-    #[error("model `{model_id}` is missing a patch path in the manifest")]
-    PatchPathMissing { model_id: String },
-    #[error("python helper script not found at `{0}`")]
-    HelperMissing(PathBuf),
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("failed to serialize request payload: {0}")]
-    SerializeFailure(#[from] serde_json::Error),
-    #[error("python helper exited with status {status}: {stderr}")]
-    PythonFailure { status: i32, stderr: String },
-    #[error("failed to parse python helper response: {0}")]
-    ResponseParseFailure(serde_json::Error),
-    #[error("unsupported model change `{change}` for model `{model_id}`")]
-    UnsupportedModelChange { model_id: String, change: String },
-}
 
 #[derive(Debug, Serialize)]
 struct PythonColumnChange<'a> {
@@ -46,7 +27,7 @@ struct PythonResponse {
     updated_columns: Vec<String>,
 }
 
-pub fn apply_model_changes_with_ruamel(
+pub fn apply_with_python(
     project_root: &Path,
     changes: &BTreeMap<String, ModelChanges>,
 ) -> Result<Vec<(String, Vec<String>)>, WriteBackError> {
@@ -75,16 +56,20 @@ pub fn apply_model_changes_with_ruamel(
 
         for change in &model_changes.changes {
             match change {
-                ModelChange::MovePropertiesFile { new_path } => {
+                ModelChange::MovePropertiesFile {
+                    patch_path: _cp,
+                    new_path,
+                    ..
+                } => {
                     let new_resolved_path = if new_path.is_absolute() {
                         new_path.clone()
                     } else {
                         project_root.join(new_path)
                     };
                     if let Some(parent) = new_resolved_path.parent() {
-                        fs::create_dir_all(parent)?;
+                        std::fs::create_dir_all(parent)?;
                     }
-                    fs::rename(&resolved_path, &new_resolved_path)?;
+                    std::fs::rename(&resolved_path, &new_resolved_path)?;
                     resolved_path = new_resolved_path;
                 }
                 other => {
@@ -132,9 +117,9 @@ pub fn apply_model_changes_with_ruamel(
     Ok(results)
 }
 
-fn resolve_helper_path() -> Result<PathBuf, WriteBackError> {
-    if let Ok(path) = env::var("DBT_LINT_YAML_HELPER") {
-        let path = PathBuf::from(path);
+fn resolve_helper_path() -> Result<std::path::PathBuf, WriteBackError> {
+    if let Ok(path) = std::env::var("DBT_LINT_YAML_HELPER") {
+        let path = std::path::PathBuf::from(path);
         if path.exists() {
             return Ok(path);
         }
@@ -143,15 +128,15 @@ fn resolve_helper_path() -> Result<PathBuf, WriteBackError> {
 
     let mut candidates = Vec::new();
 
-    if let Ok(exe_path) = env::current_exe()
+    if let Ok(exe_path) = std::env::current_exe()
         && let Some(dir) = exe_path.parent()
     {
         candidates.push(dir.join("ruamel_model_changes.py"));
         candidates.push(dir.join("scripts").join("ruamel_model_changes.py"));
     }
 
-    let fallback =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ruamel_model_changes.py");
+    let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts/ruamel_model_changes.py");
     candidates.push(fallback.clone());
 
     for candidate in &candidates {

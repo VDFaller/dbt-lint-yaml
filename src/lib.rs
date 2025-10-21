@@ -1,3 +1,4 @@
+pub mod change_descriptors;
 pub mod check;
 pub mod config;
 pub mod osmosis;

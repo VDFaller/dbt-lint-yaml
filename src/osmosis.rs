@@ -1,7 +1,4 @@
-use crate::{
-    check::{ColumnChange, ModelChanges},
-    config::Config,
-};
+use crate::{change_descriptors::ColumnChange, check::ModelChanges, config::Config};
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::BTreeMap;
 
@@ -106,12 +103,20 @@ mod tests {
     fn model_changes_fixture() -> BTreeMap<String, ModelChanges> {
         let mut customers_columns = BTreeSet::new();
         customers_columns.insert(ColumnChange::DescriptionChanged {
+            model_id: "model.jaffle_shop.customers".to_string(),
+            model_name: "customers".to_string(),
+            patch_path: None,
+            column_name: "customer_id".to_string(),
             old: Some("Old description".to_string()),
             new: Some("Fresh description".to_string()),
         });
 
         let mut orders_columns = BTreeSet::new();
         orders_columns.insert(ColumnChange::DescriptionChanged {
+            model_id: "model.jaffle_shop.orders".to_string(),
+            model_name: "orders".to_string(),
+            patch_path: None,
+            column_name: "order_id".to_string(),
             old: None,
             new: Some("New order description".to_string()),
         });

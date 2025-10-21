@@ -1,6 +1,7 @@
 use clap::Parser;
 use dbt_lint_yaml::{
-    check::{CheckEvent, ColumnChange, check_all_with_report},
+    change_descriptors::ColumnChange,
+    check::{CheckEvent, check_all_with_report},
     config::Config,
     writeback,
 };
@@ -218,7 +219,7 @@ async fn main() -> FsResult<()> {
         if let Some(model_changes) =
             (!check_result.model_changes.is_empty()).then_some(&check_result.model_changes)
         {
-            match writeback::apply_model_changes_with_ruamel(project_dir.as_path(), model_changes) {
+            match writeback::apply_model_changes(project_dir.as_path(), model_changes, &config) {
                 Ok(applied) => {
                     for (model_id, columns) in applied {
                         if columns.is_empty() {

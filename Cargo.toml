@@ -50,6 +50,9 @@ name = "write-default-config"
 path = "src/bin/write-default-config.rs"
 required-features = ["write-default-config"]
 
+[dev-dependencies]
+tempfile = "3.6"
+
 [package.metadata.release]
 allow-branch = ["main"]
 tag-name = "v{{version}}"

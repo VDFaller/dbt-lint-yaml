@@ -81,6 +81,19 @@ pub struct Config {
     pub required_tests: Vec<String>,
     #[serde(default)]
     pub render_descriptions: bool,
+    #[serde(default = "default_writeback")]
+    pub writeback: WritebackMethod,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WritebackMethod {
+    Python,
+    Rust,
+}
+
+fn default_writeback() -> WritebackMethod {
+    WritebackMethod::Python
 }
 
 impl Default for Config {
@@ -94,6 +107,7 @@ impl Default for Config {
             model_fanout_threshold: default_model_fanout_threshold(),
             required_tests: Vec::new(),
             render_descriptions: false,
+            writeback: default_writeback(),
         }
     }
 }

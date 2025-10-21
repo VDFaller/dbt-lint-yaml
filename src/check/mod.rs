@@ -10,8 +10,10 @@ mod sources;
 use models::check_model;
 use sources::check_source;
 
-pub use columns::{ColumnChange, ColumnFailure, ColumnResult};
-pub use models::{ModelChange, ModelChanges, ModelFailure, ModelResult};
+pub use crate::change_descriptors::ColumnChange;
+pub use crate::change_descriptors::{ModelChange, ModelChanges};
+pub use columns::{ColumnFailure, ColumnResult};
+pub use models::{ModelFailure, ModelResult};
 pub use sources::{SourceFailure, SourceResult};
 
 #[derive(Debug, Clone)]
