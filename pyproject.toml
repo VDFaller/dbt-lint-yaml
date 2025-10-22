@@ -1,0 +1,10 @@
+[project]
+name = "dbt-lint-yaml"
+version = "0.1.0"
+description = "Just here for development purposes for now."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "dbt-databricks>=1.10.12",
+    "ruamel-yaml>=0.18.15",
+]
