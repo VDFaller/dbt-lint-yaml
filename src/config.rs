@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use strsim::levenshtein;
 use struct_field_names_as_array::FieldNamesAsSlice;
 use strum::{AsRefStr, EnumIter, EnumProperty, IntoEnumIterator};
@@ -28,6 +29,7 @@ pub enum Selector {
     MissingSourceDescriptions,
     MissingSourceTableDescriptions,
     DirectJoinToSource,
+    #[strum(props(fixable = "true"))]
     MissingPropertiesFile,
     DuplicateSources,
     ModelFanout,
@@ -152,8 +154,8 @@ impl ConfigFile {
         }
 
         // Deserialize to typed Config
-        let config: Config = base_value.try_into().map_err(ConfigError::Deserialize)?;
-
+        let mut config: Config = base_value.try_into().map_err(ConfigError::Deserialize)?;
+        config.project_dir = Some(std::path::Path::new(&iarg.project_dir).to_path_buf());
         Ok(config)
     }
 }
@@ -171,6 +173,9 @@ pub struct Config {
     pub unfixable: Vec<Selector>,
     #[serde(skip)]
     pub fix: bool,
+
+    #[serde(skip)]
+    pub project_dir: Option<PathBuf>,
 
     // args
     #[serde(default = "default_model_fanout_threshold")]
@@ -205,6 +210,7 @@ impl Default for Config {
             fixable: default_fixable(),
             unfixable: Vec::new(),
             fix: false,
+            project_dir: None,
             model_fanout_threshold: default_model_fanout_threshold(),
             required_tests: Vec::new(),
             render_descriptions: false,
