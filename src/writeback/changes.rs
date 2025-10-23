@@ -153,10 +153,11 @@ mod tests {
     #[test]
     fn column_change_updates_existing_column() {
         let mut root = ModelsRoot {
-            models: Vec::new(),
+            models: Some(Vec::new()),
+            sources: None,
             extras: BTreeMap::new(),
         };
-        root.models.push(ModelDoc {
+        root.models.as_mut().unwrap().push(ModelDoc {
             name: Some("test_model".to_string()),
             description: None,
             columns: vec![ColumnDoc {
@@ -196,10 +197,11 @@ mod tests {
     #[test]
     fn column_change_appends_missing_column() {
         let mut root = ModelsRoot {
-            models: Vec::new(),
+            models: Some(Vec::new()),
+            sources: None,
             extras: BTreeMap::new(),
         };
-        root.models.push(ModelDoc {
+        root.models.as_mut().unwrap().push(ModelDoc {
             name: Some("test_model".to_string()),
             description: None,
             columns: vec![],
@@ -249,7 +251,8 @@ mod tests {
 
         // Apply the model change with project_root set to the temp dir
         let mut root = ModelsRoot {
-            models: Vec::new(),
+            models: Some(Vec::new()),
+            sources: None,
             extras: BTreeMap::new(),
         };
         change.apply_with_fs(&mut root, dir.path()).expect("apply");

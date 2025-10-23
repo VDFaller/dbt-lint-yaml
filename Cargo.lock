@@ -269,7 +269,7 @@ dependencies = [
  "arrow-schema",
  "arrow-select",
  "atoi",
- "base64",
+ "base64 0.22.1",
  "chrono",
  "comfy-table",
  "half",
@@ -479,6 +479,12 @@ dependencies = [
  "rustc-demangle",
  "windows-link 0.2.0",
 ]
+
+[[package]]
+name = "base64"
+version = "0.21.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
 name = "base64"
@@ -1083,7 +1089,7 @@ dependencies = [
  "ahash",
  "arrow",
  "arrow-ipc",
- "base64",
+ "base64 0.22.1",
  "half",
  "hashbrown 0.14.5",
  "indexmap 2.11.4",
@@ -1196,7 +1202,7 @@ version = "2.0.0-preview.40"
 source = "git+https://github.com/dbt-labs/dbt-fusion?rev=f8dda7da5d4c9c7f845613c9aebcbf1f523c0360#f8dda7da5d4c9c7f845613c9aebcbf1f523c0360"
 dependencies = [
  "adbc_core",
- "base64",
+ "base64 0.22.1",
  "dbt-fusion-workspace-hack",
  "dbt-serde_yaml",
  "dbt-xdbc",
@@ -1486,6 +1492,15 @@ dependencies = [
 name = "dbt-lint-yaml"
 version = "0.3.1"
 dependencies = [
+ "arrow",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-csv",
+ "arrow-data",
+ "arrow-ipc",
+ "arrow-json",
+ "arrow-schema",
+ "base64 0.21.7",
  "clap",
  "dbt-common",
  "dbt-dag",
@@ -1496,8 +1511,11 @@ dependencies = [
  "dbt-schemas",
  "dbt-serde_yaml",
  "minijinja",
+ "parquet",
  "serde",
+ "serde_arrow",
  "serde_json",
+ "serde_with",
  "strsim",
  "struct-field-names-as-array",
  "strum",
@@ -1716,7 +1734,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "atomic-wait",
- "base64",
+ "base64 0.22.1",
  "chrono",
  "dbt-cancel",
  "dbt-fusion-workspace-hack",
@@ -2370,7 +2388,7 @@ version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c6995591a8f1380fcb4ba966a252a4b29188d51d2b89e3a252f5305be65aea8"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-core",
@@ -3390,7 +3408,7 @@ dependencies = [
  "arrow-ipc",
  "arrow-schema",
  "arrow-select",
- "base64",
+ "base64 0.22.1",
  "brotli",
  "bytes",
  "chrono",
@@ -3439,7 +3457,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "898bac3fa00d0ba57a4e8289837e965baa2dee8c3749f3b11d45a64b4223d9c3"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "serde",
 ]
 
@@ -4084,7 +4102,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d429f34c8092b2d42c7c93cec323bb4adeb7c67698f70839adec842ec10c7ceb"
 dependencies = [
  "async-compression",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "encoding_rs",
  "futures-channel",
@@ -4655,7 +4673,7 @@ version = "3.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6093cd8c01b25262b84927e0f7151692158fab02d961e04c979d3903eba7ecc5"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -5350,7 +5368,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "http",
  "http-body",
@@ -5582,7 +5600,7 @@ version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99ba1025f18a4a3fc3e9b48c868e9beb4f24f4b4b1a325bada26bd4119f46537"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "cookie_store",
  "flate2",
  "log",
@@ -5604,7 +5622,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b4531c118335662134346048ddb0e54cc86bd7e81866757873055f0e38f5d2"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "http",
  "httparse",
  "log",

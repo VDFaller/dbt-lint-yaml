@@ -1,6 +1,7 @@
 use super::RuleOutcome;
 use super::columns::{self, ColumnFailure, ColumnResult};
 use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
+use crate::codegen::write_generated_model;
 use crate::{
     config::{Config, Selector},
     osmosis::get_upstream_col_desc,
@@ -142,37 +143,42 @@ pub(crate) fn check_model(
 
     let mut failures: Vec<ModelFailure> = Vec::new();
     let mut model_level_changes: Vec<ModelChange> = Vec::new();
+
+    if let Some(f) = missing_properties_file(node, config) {
+        failures.push(f)
+    }
+
+    // all these checks are dependent on the properties file existing
     if let Some(f) = missing_model_description(model_meta, config) {
         failures.push(f)
     }
     if let Some(f) = missing_model_tags(model_meta, config) {
         failures.push(f)
     }
-    if let Some(f) = direct_join_to_source(model_meta, config) {
+    if let Some(f) = missing_required_tests(manifest, model_meta, config) {
         failures.push(f)
     }
-    if let Some(f) = missing_properties_file(node, config) {
+    if let Some(f) = missing_primary_key(model_meta, config) {
+        failures.push(f)
+    }
+    if let Some(f) = public_model_without_contract(model_meta, config) {
+        failures.push(f)
+    }
+    // end of properties-file-dependent checks
+
+    if let Some(f) = direct_join_to_source(model_meta, config) {
         failures.push(f)
     }
     if let Some(f) = model_fanout(manifest, model_id, config) {
         failures.push(f)
     }
-    if let Some(f) = missing_required_tests(manifest, model_meta, config) {
-        failures.push(f)
-    }
     if let Some(f) = root_model(model_meta, config) {
-        failures.push(f)
-    }
-    if let Some(f) = missing_primary_key(model_meta, config) {
         failures.push(f)
     }
     if let Some(f) = multiple_sources_joined(model_meta, config) {
         failures.push(f)
     }
     if let Some(f) = rejoining_of_upstream_concepts(manifest, model_meta, config) {
-        failures.push(f)
-    }
-    if let Some(f) = public_model_without_contract(model_meta, config) {
         failures.push(f)
     }
     match model_separate_from_properties_file(node, config) {
@@ -331,7 +337,24 @@ fn missing_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailu
         DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.is_none(),
         _ => false,
     };
-    missing_patch.then_some(ModelFailure::MissingPropertiesFile)
+    if !missing_patch {
+        return None;
+    }
+
+    // fixing this on the fly because there's will only be one IO operation anyway
+    // and that will make it so the other checks can happen
+    // no reason to use the change framework here
+    if config.is_fixable(Selector::MissingPropertiesFile)
+        && let DbtNode::Model(model) = node
+    {
+        if let Err(e) = write_generated_model(model, config.project_dir.as_deref()) {
+            eprintln!("failed to write generated model properties: {e}");
+            return Some(ModelFailure::MissingPropertiesFile);
+        }
+        return None;
+    }
+
+    Some(ModelFailure::MissingPropertiesFile)
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
@@ -600,7 +623,14 @@ mod tests {
         let manifest = manifest_with_inheritable_column();
         let prior_changes = BTreeMap::<String, ModelChanges>::new();
 
-        let config = Config::default().with_fix(true);
+        let config = Config {
+            select: vec![
+                Selector::MissingModelDescriptions,
+                Selector::MissingColumnDescriptions,
+            ],
+            ..Default::default()
+        }
+        .with_fix(true);
         let model_result = check_model(&manifest, "model.test.downstream", &prior_changes, &config);
 
         let changes = model_result

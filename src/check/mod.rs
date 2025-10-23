@@ -145,7 +145,7 @@ fn nodes_in_dag_order(manifest: &DbtManifestV12) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::{Config, Selector};
     use dbt_schemas::schemas::{dbt_column::DbtColumn, manifest::DbtNode};
     use std::sync::Arc;
 
@@ -199,7 +199,14 @@ mod tests {
     fn check_all_collects_model_changes() {
         let manifest = manifest_with_inheritable_column();
 
-        let config = Config::default().with_fix(true);
+        let config = Config {
+            select: vec![
+                Selector::MissingModelDescriptions,
+                Selector::MissingColumnDescriptions,
+            ],
+            ..Default::default()
+        }
+        .with_fix(true);
         let result = check_all(&manifest, &config);
 
         assert_eq!(result.model_changes.len(), 1);
