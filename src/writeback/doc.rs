@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ColumnDoc {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(flatten)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
@@ -12,6 +13,7 @@ pub struct ColumnDoc {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ModelDoc {
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub columns: Vec<ColumnDoc>,
     #[serde(flatten)]
