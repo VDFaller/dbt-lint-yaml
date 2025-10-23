@@ -1,3 +1,10 @@
 exclude = ["missing_model_tags"]
 model_fanout_threshold = 3
 required_tests = []
+
+[target.dev]
+select = [
+    "missing_column_descriptions",
+    "missing_model_descriptions",
+]
+model_fanout_threshold = 5

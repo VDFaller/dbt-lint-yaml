@@ -2,7 +2,7 @@ use clap::Parser;
 use dbt_lint_yaml::{
     change_descriptors::ColumnChange,
     check::{CheckEvent, check_all_with_report},
-    config::Config,
+    config::ConfigFile,
     writeback,
 };
 
@@ -155,6 +155,7 @@ async fn main() -> FsResult<()> {
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let (filtered_args, verbose, fix_flag) = extract_shimmed_flags(raw_args);
 
+    // DBT parsing to build manifest
     let cli = Cli::parse_from(filtered_args);
     let system_args = from_main(&cli);
 
@@ -163,7 +164,6 @@ async fn main() -> FsResult<()> {
 
     let load_args = LoadArgs::from_eval_args(&eval_args);
     let project_dir = load_args.io.in_dir.clone();
-    let config = Config::from_toml(&project_dir).with_fix(fix_flag);
 
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
     let _cts = CancellationTokenSource::new();
@@ -194,6 +194,14 @@ async fn main() -> FsResult<()> {
 
     let dbt_manifest = build_manifest(&invocation_id, &resolved_state);
 
+    // where I come in
+    let config = match ConfigFile::resolve(&invocation_args) {
+        Ok(cfg) => cfg.with_fix(fix_flag),
+        Err(err) => {
+            eprintln!("Failed to load configuration: {err}");
+            std::process::exit(2);
+        }
+    };
     let check_result = check_all_with_report(&dbt_manifest, &config, |event| {
         report_event(event, verbose);
     });
