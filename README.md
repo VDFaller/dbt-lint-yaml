@@ -44,4 +44,5 @@ See the [Configuration](./configuration.md) section for details on how to set up
 The default rules can be found in the [default-dbt-lint.yml](./docs/default-dbt-lint.toml) file.
 
 
-## Current Rules (DOCUMENT ME)
+## Current Rules
+See the [rules documentation](docs/rules/index.md) for a full list of available rules and their descriptions.
