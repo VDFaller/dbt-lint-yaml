@@ -25,7 +25,7 @@
 - This rule only inserts descriptions when a confident upstream match exists. It will not invent free-text descriptions.
 
 ## Implementation (for contributors)
-- Source: [src/check/models.rs](src/check/models.rs) -> `check_model_column`
+- Source: [src/check/models.rs](/src/check/models.rs) -> `check_model_column`
 
 ## See also
-- General configuration: [docs/configuration.md](docs/configuration.md)
+- General configuration: [docs/configuration.md](/docs/configuration.md)
