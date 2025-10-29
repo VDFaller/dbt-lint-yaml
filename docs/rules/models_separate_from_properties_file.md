@@ -15,7 +15,7 @@
 - Not currently reliably fixable in all cases. The selector is marked unfixable by default in code comments.
 
 ## Implementation (for contributors)
-- Source: [src/check/models.rs](src/check/models.rs) (note: writeback for this selector is disabled in some situations)
+- Source: [src/check/models.rs](/src/check/models.rs) (note: writeback for this selector is disabled in some situations)
 
 ## See also
-- General configuration: [docs/configuration.md](docs/configuration.md)
+- General configuration: [docs/configuration.md](/docs/configuration.md)

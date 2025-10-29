@@ -15,7 +15,7 @@
 - Yes. When `--fix` is enabled, the tool can create a minimal properties YAML for the model. Review generated files before committing.
 
 ## Implementation (for contributors)
-- Source: [src/check/models.rs](src/check/models.rs) (creates a `ModelChange` descriptor for writeback)
+- Source: [src/check/models.rs](/src/check/models.rs) (creates a `ModelChange` descriptor for writeback)
 
 ## See also
-- General configuration: [docs/configuration.md](docs/configuration.md)
+- General configuration: [docs/configuration.md](/docs/configuration.md)

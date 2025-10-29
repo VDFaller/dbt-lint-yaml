@@ -15,7 +15,7 @@
 - No.
 
 ## Implementation (for contributors)
-- Source: [src/check/sources.rs](src/check/sources.rs)
+- Source: [src/check/sources.rs](/src/check/sources.rs)
 
 ## See also
-- General configuration: [docs/configuration.md](docs/configuration.md)
+- General configuration: [docs/configuration.md](/docs/configuration.md)
