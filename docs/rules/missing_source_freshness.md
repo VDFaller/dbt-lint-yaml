@@ -1,21 +1,21 @@
-Title: Missing source freshness
+# Missing source freshness
 
-rule_id: missing_source_freshness
+**rule_id**: missing_source_freshness
 
-Summary
+## Summary
 - A source is missing `freshness` configuration or required freshness metadata.
 
-What it checks
+## What it checks
 - Ensures sources include freshness metadata where policy expects it.
 
-Default
+## Default
 - Enabled.
 
-Autofixable with `--fix`?
+## Autofixable with `--fix`?
 - No.
 
-Implementation (for contributors)
+## Implementation (for contributors)
 - Source: [src/check/sources.rs](src/check/sources.rs)
 
-See also
+## See also
 - General configuration: [docs/configuration.md](docs/configuration.md)

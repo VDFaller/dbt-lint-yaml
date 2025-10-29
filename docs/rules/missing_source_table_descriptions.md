@@ -1,21 +1,21 @@
-Title: Missing source table descriptions
+# Missing source table descriptions
 
-rule_id: missing_source_table_descriptions
+**rule_id**: missing_source_table_descriptions
 
-Summary
+## Summary
 - A table inside a source is missing descriptive metadata (table- or column-level).
 
-What it checks
+## What it checks
 - Ensures tables declared under `sources:` include `description` text and, where appropriate, column descriptions.
 
-Default
+## Default
 - Enabled.
 
-Autofixable with `--fix`?
+## Autofixable with `--fix`?
 - No.
 
-Implementation (for contributors)
+## Implementation (for contributors)
 - Source: [src/check/sources.rs](src/check/sources.rs)
 
-See also
+## See also
 - General configuration: [docs/configuration.md](docs/configuration.md)

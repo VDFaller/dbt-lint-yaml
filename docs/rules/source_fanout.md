@@ -1,21 +1,21 @@
-Title: Source fanout
+# Source fanout
 
-rule_id: source_fanout
+**rule_id**: source_fanout
 
-Summary
+## Summary
 - Flags source tables that are used widely across many models (high fanout).
 
-What it checks
+## What it checks
 - Counts how many models reference a source and flags those above an implicit threshold.
 
-Default
+## Default
 - Enabled.
 
-Autofixable with `--fix`?
+## Autofixable with `--fix`?
 - No.
 
-Implementation (for contributors)
+## Implementation (for contributors)
 - Source: [src/check/sources.rs](src/check/sources.rs)
 
-See also
+## See also
 - General configuration: [docs/configuration.md](docs/configuration.md)

@@ -1,21 +1,21 @@
-Title: Unused sources
+# Unused sources
 
-rule_id: unused_sources
+**rule_id**: unused_sources
 
-Summary
+## Summary
 - Detects sources defined in YAML that are not referenced by any model.
 
-What it checks
+## What it checks
 - Flags source definitions that are not used anywhere in the project.
 
-Default
+## Default
 - Enabled.
 
-Autofixable with `--fix`?
+## Autofixable with `--fix`?
 - No.
 
-Implementation (for contributors)
+## Implementation (for contributors)
 - Source: [src/check/sources.rs](src/check/sources.rs)
 
-See also
+## See also
 - General configuration: [docs/configuration.md](docs/configuration.md)

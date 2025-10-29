@@ -1,24 +1,24 @@
-Title: Multiple sources joined
+# Multiple sources joined
 
-rule_id: multiple_sources_joined
+**rule_id**: multiple_sources_joined
 
-Summary
+## Summary
 - Detects models that join multiple distinct sources together.
 
-What it checks
+## What it checks
 - Flags SQL that merges rows from two or more different `source()` relations into a single model.
 
-Why this matters
+## Why this matters
 - Joining many unrelated sources in one model can increase coupling and complicate lineage and ownership.
 
-Default
+## Default
 - Enabled.
 
-Autofixable with `--fix`?
+## Autofixable with `--fix`?
 - No.
 
-Implementation (for contributors)
+## Implementation (for contributors)
 - Source: [src/check/models.rs](src/check/models.rs)
 
-See also
+## See also
 - General configuration: [docs/configuration.md](docs/configuration.md)
