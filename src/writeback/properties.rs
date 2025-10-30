@@ -8,15 +8,15 @@ use std::collections::BTreeMap;
 
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ColumnDoc {
+pub struct ColumnProperty {
     pub name: String,
     pub description: Option<String>,
     #[serde(flatten)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 
-impl ColumnDoc {
-    fn merge(&mut self, other: &ColumnDoc) {
+impl ColumnProperty {
+    fn merge(&mut self, other: &ColumnProperty) {
         if other.description.is_some() {
             self.description = other.description.clone();
         }
@@ -29,20 +29,20 @@ impl ColumnDoc {
 
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ModelDoc {
+pub struct ModelProperty {
     pub name: Option<String>,
     pub description: Option<String>,
-    pub columns: Vec<ColumnDoc>,
+    pub columns: Vec<ColumnProperty>,
     #[serde(flatten)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 
-impl ModelDoc {
-    pub fn merge(&mut self, other: &ModelDoc) {
+impl ModelProperty {
+    pub fn merge(&mut self, other: &ModelProperty) {
         if self.description.is_none() {
             self.description = other.description.clone();
         }
-        let mut other_columns_map: BTreeMap<String, &ColumnDoc> = BTreeMap::new();
+        let mut other_columns_map: BTreeMap<String, &ColumnProperty> = BTreeMap::new();
         for col in &other.columns {
             other_columns_map.insert(col.name.clone(), col);
         }
@@ -67,20 +67,20 @@ impl ModelDoc {
 
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct SourceDoc {
+pub struct SourceProperty {
     pub name: String,
     pub description: Option<String>,
-    pub tables: Vec<ModelDoc>,
+    pub tables: Vec<ModelProperty>,
     #[serde(flatten)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 
-impl SourceDoc {
-    pub fn merge(&mut self, other: &SourceDoc) {
+impl SourceProperty {
+    pub fn merge(&mut self, other: &SourceProperty) {
         if self.description.is_none() {
             self.description = other.description.clone();
         }
-        let mut other_tables_map: BTreeMap<String, &ModelDoc> = BTreeMap::new();
+        let mut other_tables_map: BTreeMap<String, &ModelProperty> = BTreeMap::new();
         for table in &other.tables {
             if let Some(name) = &table.name {
                 other_tables_map.insert(name.clone(), table);
@@ -102,15 +102,15 @@ impl SourceDoc {
 
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ModelsRoot {
-    pub models: Option<Vec<ModelDoc>>,
-    pub sources: Option<Vec<SourceDoc>>,
+pub struct PropertyFile {
+    pub models: Option<Vec<ModelProperty>>,
+    pub sources: Option<Vec<SourceProperty>>,
     #[serde(flatten)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 
-impl ModelsRoot {
-    pub fn find_model_mut(&mut self, model_name: &str) -> Option<&mut ModelDoc> {
+impl PropertyFile {
+    pub fn find_model_mut(&mut self, model_name: &str) -> Option<&mut ModelProperty> {
         self.models.as_mut().and_then(|models| {
             models
                 .iter_mut()
@@ -126,37 +126,45 @@ mod tests {
 
     #[test]
     fn test_column_merge_fills_description() {
-        let mut a = ColumnDoc {
+        let mut a = ColumnProperty {
             name: "col_a".to_string(),
             description: None,
             extras: BTreeMap::new(),
         };
-        let mut b = ColumnDoc {
+        let mut b = ColumnProperty {
             name: "col_a".to_string(),
             description: Some("desc from b".to_string()),
             extras: BTreeMap::new(),
         };
 
         a.merge(&b);
-        assert_eq!(a.description.as_deref(), Some("desc from b"), "fills description");
+        assert_eq!(
+            a.description.as_deref(),
+            Some("desc from b"),
+            "fills description"
+        );
 
         b.description = Some("new desc from b".to_string());
         a.merge(&b);
-        assert_eq!(a.description.as_deref(), Some("new desc from b"), "overwrites description");
+        assert_eq!(
+            a.description.as_deref(),
+            Some("new desc from b"),
+            "overwrites description"
+        );
     }
 
     #[test]
     fn test_model_merge() {
-        let mut self_model = ModelDoc {
+        let mut self_model = ModelProperty {
             name: Some("model_1".to_string()),
             description: None,
             columns: vec![
-                ColumnDoc {
+                ColumnProperty {
                     name: "c1".to_string(),
                     description: None,
                     extras: BTreeMap::new(),
                 },
-                ColumnDoc {
+                ColumnProperty {
                     name: "c3".to_string(),
                     description: Some("c3 desc".to_string()),
                     extras: BTreeMap::new(),
@@ -165,16 +173,16 @@ mod tests {
             extras: BTreeMap::new(),
         };
 
-        let other_model = ModelDoc {
+        let other_model = ModelProperty {
             name: Some("model_1".to_string()),
             description: Some("model description".to_string()),
             columns: vec![
-                ColumnDoc {
+                ColumnProperty {
                     name: "c1".to_string(),
                     description: Some("c1 desc".to_string()),
                     extras: BTreeMap::new(),
                 },
-                ColumnDoc {
+                ColumnProperty {
                     name: "c2".to_string(),
                     description: Some("c2 desc".to_string()),
                     extras: BTreeMap::new(),
@@ -215,10 +223,10 @@ mod tests {
 
     #[test]
     fn source_merge_merges_table_and_description() {
-        let mut src_a = SourceDoc {
+        let mut src_a = SourceProperty {
             name: "source_x".to_string(),
             description: None,
-            tables: vec![ModelDoc {
+            tables: vec![ModelProperty {
                 name: Some("t1".to_string()),
                 description: None,
                 columns: vec![],
@@ -227,13 +235,13 @@ mod tests {
             extras: BTreeMap::new(),
         };
 
-        let src_b = SourceDoc {
+        let src_b = SourceProperty {
             name: "source_x".to_string(),
             description: Some("source desc".to_string()),
-            tables: vec![ModelDoc {
+            tables: vec![ModelProperty {
                 name: Some("t1".to_string()),
                 description: Some("table desc".to_string()),
-                columns: vec![ColumnDoc {
+                columns: vec![ColumnProperty {
                     name: "col_z".to_string(),
                     description: Some("z desc".to_string()),
                     extras: BTreeMap::new(),
@@ -257,8 +265,8 @@ mod tests {
 
     #[test]
     fn find_model_mut_returns_mutable_reference() {
-        let mut root = ModelsRoot {
-            models: Some(vec![ModelDoc {
+        let mut root = PropertyFile {
+            models: Some(vec![ModelProperty {
                 name: Some("m_x".to_string()),
                 description: None,
                 columns: vec![],

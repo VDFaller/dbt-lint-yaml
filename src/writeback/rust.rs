@@ -1,7 +1,7 @@
 use super::WriteBackError;
 use crate::check::ModelChanges;
 use crate::writeback::changes::ExecutableChange;
-use crate::writeback::doc::ModelsRoot;
+use crate::writeback::properties::PropertyFile;
 use dbt_serde_yaml;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -32,7 +32,7 @@ pub fn apply_with_rust(
         };
 
         let yaml_str = std::fs::read_to_string(&resolved_path)?;
-        let mut docs: ModelsRoot = dbt_serde_yaml::from_str(&yaml_str)?;
+        let mut docs: PropertyFile = dbt_serde_yaml::from_str(&yaml_str)?;
 
         let mut updated_columns = Vec::new();
 
