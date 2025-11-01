@@ -145,6 +145,24 @@ fn report_event(event: CheckEvent<'_>, verbose: bool) {
                 }
             }
         }
+        CheckEvent::Exposure(exposure_result) => {
+            if exposure_result.failures.is_empty() {
+                if verbose {
+                    println!(
+                        "\x1b[32msuccess:\x1b[0m {} passed",
+                        exposure_result.exposure_id
+                    );
+                }
+            } else {
+                println!(
+                    "\x1b[31merror:\x1b[0m {} failed",
+                    exposure_result.exposure_id
+                );
+                for reason in &exposure_result.failures {
+                    println!("    * {reason}");
+                }
+            }
+        }
     }
 }
 
