@@ -28,6 +28,7 @@ pub enum Selector {
     MissingModelTags,
     MissingSourceDescriptions,
     MissingSourceTableDescriptions,
+    MissingSourceColumnDescriptions,
     DirectJoinToSource,
     #[strum(props(fixable = "true"))]
     MissingPropertiesFile,

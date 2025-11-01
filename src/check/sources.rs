@@ -1,4 +1,5 @@
 use crate::config::{Config, Selector};
+use crate::check::columns::missing_description;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, ManifestSource};
 use std::fmt::Display;
 use strum::AsRefStr;
@@ -10,6 +11,7 @@ pub enum SourceFailure {
     UnusedSource,
     MissingFreshness,
     MissingSourceDescription,
+    SourceTableColumnDescriptions,
     SourceFanout,
 }
 impl Display for SourceFailure {
@@ -77,6 +79,9 @@ pub(crate) fn check_source(
     if let Some(failure) = missing_source_table_description(source, config) {
         failures.push(failure);
     }
+    if let Some(failure) = missing_source_column_descriptions(source, config) {
+        failures.push(failure);
+    }
     if let Some(failure) = duplicate_source(manifest, source, config) {
         failures.push(failure);
     }
@@ -107,6 +112,23 @@ fn missing_source_table_description(
         return None;
     }
     (source.__common_attr__.description.is_none()).then_some(SourceFailure::MissingDescription)
+}
+
+/// Check that every column on a source table has a non-empty description.
+fn missing_source_column_descriptions(
+    source: &ManifestSource,
+    config: &Config,
+) -> Option<SourceFailure> {
+    if !config.is_selected(Selector::MissingSourceTableDescriptions) {
+        return None;
+    }
+
+    let has_missing = source
+        .columns
+        .values()
+        .any(|col| missing_description(col).is_some());
+
+    has_missing.then_some(SourceFailure::SourceTableColumnDescriptions)
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/documentation/#undocumented-sources
@@ -200,6 +222,8 @@ mod tests {
     use crate::config::Config;
     use dbt_schemas::schemas::common::{FreshnessDefinition, FreshnessPeriod, FreshnessRules};
     use dbt_schemas::schemas::manifest::ManifestSource;
+    use dbt_schemas::schemas::dbt_column::DbtColumn;
+    use std::sync::Arc;
 
     #[test]
     fn test_missing_source_description() {
@@ -308,5 +332,34 @@ mod tests {
         let source = manifest.sources.get("source.raw.orders").unwrap();
         let config = Config::default();
         assert!(source_fanout(&manifest, source, &config).is_some());
+    }
+
+    #[test]
+    fn test_missing_source_table_column_descriptions() {
+        let mut source = ManifestSource::default();
+        // create a column without a description
+        let col = DbtColumn {
+            name: "id".to_string(),
+            description: None,
+            ..Default::default()
+        };
+        source.columns.insert("id".to_string(), Arc::new(col));
+
+        let config = Config::default();
+        assert!(missing_source_column_descriptions(&source, &config).is_some());
+    }
+
+    #[test]
+    fn test_source_table_column_descriptions_all_present() {
+        let mut source = ManifestSource::default();
+        let col = DbtColumn {
+            name: "id".to_string(),
+            description: Some("identifier".to_string()),
+            ..Default::default()
+        };
+        source.columns.insert("id".to_string(), Arc::new(col));
+
+        let config = Config::default();
+        assert!(missing_source_column_descriptions(&source, &config).is_none());
     }
 }
