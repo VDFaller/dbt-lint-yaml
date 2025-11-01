@@ -251,6 +251,7 @@ fn missing_source_freshness(source: &ManifestSource, config: &Config) -> Option<
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::vec;
 
     use super::*;
     use crate::config::Config;
@@ -390,7 +391,10 @@ mod tests {
         };
         source.columns.insert("id".to_string(), Arc::new(col));
 
-        let config = Config::default();
+        let config = Config {
+            select: vec![Selector::MissingSourceColumnDescriptions],
+            ..Default::default()
+        };
         assert!(missing_source_column_descriptions(&source, &config).is_some());
     }
 
