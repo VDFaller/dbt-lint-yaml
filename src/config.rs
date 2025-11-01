@@ -49,7 +49,10 @@ pub enum Selector {
     // if two models have the same patch path
     #[strum(props(fixable = "false"))]
     ModelsSeparateFromPropertiesFile,
+    #[strum(props(default = false))]
     ExposureDependentOnPrivateModel,
+    #[strum(props(default = false))]
+    ExposureParentsMaterializations,
 }
 
 #[derive(Debug, Error)]

@@ -1,6 +1,6 @@
 use crate::config::{Config, Selector};
 use dbt_schemas::schemas::{
-    common::Access,
+    common::{Access, DbtMaterialization},
     manifest::{DbtManifestV12, DbtNode, ManifestExposure},
 };
 use strum::AsRefStr;
@@ -8,12 +8,14 @@ use strum::AsRefStr;
 #[derive(Debug, Clone, AsRefStr, PartialEq, Eq)]
 pub enum ExposureFailure {
     DependentOnPrivateModel(Vec<String>),
+    DependentOnMaterializedModel(Vec<String>),
 }
 
 impl std::fmt::Display for ExposureFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let extra_info = match self {
             ExposureFailure::DependentOnPrivateModel(models) => models.join(", ").to_string(),
+            ExposureFailure::DependentOnMaterializedModel(models) => models.join(", ").to_string(),
         };
         write!(f, "{}({})", self.as_ref(), extra_info)
     }
@@ -48,6 +50,11 @@ fn check_exposure(
     let mut changes = vec![];
 
     match exposure_dependent_on_private_model(exposure, manifest, config) {
+        Ok(Some(change)) => changes.push(change),
+        Err(failure) => failures.push(failure),
+        _ => {}
+    }
+    match exposure_parents_materializations(exposure, manifest, config) {
         Ok(Some(change)) => changes.push(change),
         Err(failure) => failures.push(failure),
         _ => {}
@@ -91,6 +98,44 @@ fn exposure_dependent_on_private_model(
     Ok(None)
 }
 
+/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/performance/#exposure-parents-materializations
+fn exposure_parents_materializations(
+    exposure: &ManifestExposure,
+    manifest: &DbtManifestV12,
+    config: &Config,
+) -> Result<Option<ExposureChange>, ExposureFailure> {
+    if !config.is_selected(Selector::ExposureParentsMaterializations) {
+        return Ok(None);
+    }
+
+    let depends_on = &exposure.__base_attr__.depends_on.nodes;
+    let nodes = depends_on.iter().filter(|node| node.starts_with("model"));
+
+    let materialized_parents: Vec<String> = nodes
+        .filter_map(|node_name| {
+            let node = manifest.nodes.get(node_name)?;
+            match node {
+                DbtNode::Model(model) => {
+                    // fail if materialized is not table or incremental
+                    match model.config.materialized {
+                        Some(DbtMaterialization::Table) | Some(DbtMaterialization::Incremental) => {
+                            None
+                        }
+                        _ => Some(node_name.clone()),
+                    }
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    if !materialized_parents.is_empty() {
+        return Err(ExposureFailure::DependentOnMaterializedModel(
+            materialized_parents,
+        ));
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,7 +145,10 @@ mod tests {
         let mut manifest = DbtManifestV12::default();
 
         // insert an upstream model and mark it private
-        manifest.nodes.insert("model.test.upstream".to_string(), DbtNode::Model(Default::default()));
+        manifest.nodes.insert(
+            "model.test.upstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
         if let Some(DbtNode::Model(upstream)) = manifest.nodes.get_mut("model.test.upstream") {
             upstream.__common_attr__.unique_id = "model.test.upstream".to_string();
             upstream.access = Some(Access::Private);
@@ -121,7 +169,10 @@ mod tests {
         exposure.__common_attr__.unique_id = "exposure.test.dep".to_string();
         exposure.__base_attr__.depends_on.nodes = vec!["model.test.upstream".to_string()];
 
-        let cfg = Config { select: vec![Selector::ExposureDependentOnPrivateModel], ..Default::default() };
+        let cfg = Config {
+            select: vec![Selector::ExposureDependentOnPrivateModel],
+            ..Default::default()
+        };
 
         let res = exposure_dependent_on_private_model(&exposure, &manifest, &cfg);
         assert!(res.is_err());
@@ -136,7 +187,10 @@ mod tests {
     fn exposure_dependent_on_private_model_passes_when_public() {
         let mut manifest = DbtManifestV12::default();
 
-        manifest.nodes.insert("model.test.upstream".to_string(), DbtNode::Model(Default::default()));
+        manifest.nodes.insert(
+            "model.test.upstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
         if let Some(DbtNode::Model(upstream)) = manifest.nodes.get_mut("model.test.upstream") {
             upstream.__common_attr__.unique_id = "model.test.upstream".to_string();
             upstream.access = Some(Access::Public);
@@ -156,7 +210,10 @@ mod tests {
         exposure.__common_attr__.unique_id = "exposure.test.dep".to_string();
         exposure.__base_attr__.depends_on.nodes = vec!["model.test.upstream".to_string()];
 
-        let cfg = Config { select: vec![Selector::ExposureDependentOnPrivateModel], ..Default::default() };
+        let cfg = Config {
+            select: vec![Selector::ExposureDependentOnPrivateModel],
+            ..Default::default()
+        };
 
         let res = exposure_dependent_on_private_model(&exposure, &manifest, &cfg);
         assert!(res.is_ok());
