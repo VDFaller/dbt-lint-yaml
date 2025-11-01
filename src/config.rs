@@ -22,20 +22,23 @@ use thiserror::Error;
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum Selector {
-    #[strum(props(fixable = "true"))]
+    #[strum(props(fixable = true))]
     MissingColumnDescriptions,
     MissingModelDescriptions,
+    #[strum(props(default = false))]
     MissingModelTags,
     MissingSourceDescriptions,
     MissingSourceTableDescriptions,
+    #[strum(props(default = false))]
     MissingSourceColumnDescriptions,
     DirectJoinToSource,
-    #[strum(props(fixable = "true"))]
+    #[strum(props(fixable = true))]
     MissingPropertiesFile,
     DuplicateSources,
     ModelFanout,
     RootModels,
     UnusedSources,
+    #[strum(props(default = true))]
     MissingPrimaryKey,
     MissingSourceFreshness,
     MultipleSourcesJoined,
@@ -251,7 +254,9 @@ impl Config {
 }
 
 fn default_select() -> Vec<Selector> {
-    Selector::iter().collect()
+    Selector::iter()
+        .filter(|s| s.get_bool("default") != Some(false))
+        .collect()
 }
 
 fn default_model_fanout_threshold() -> usize {
@@ -260,7 +265,7 @@ fn default_model_fanout_threshold() -> usize {
 
 fn default_fixable() -> Vec<Selector> {
     Selector::iter()
-        .filter(|s| s.get_str("fixable") == Some("true"))
+        .filter(|s| s.get_bool("fixable") == Some(true))
         .collect()
 }
 
@@ -312,7 +317,15 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.select, default_select());
+        assert!(
+            config.is_selected(Selector::MissingColumnDescriptions),
+            "Randomly picked a selector that should be enabled by default"
+        );
+        assert!(
+            !config.is_selected(Selector::MissingSourceColumnDescriptions),
+            "Make sure not selecting where default = false"
+        );
+
         assert_eq!(config.exclude, Vec::new());
         assert_eq!(config.fixable, default_fixable());
         assert_eq!(config.unfixable, Vec::new());
