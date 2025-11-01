@@ -21,6 +21,6 @@
 - `missing_source_table_descriptions` — checks for table-level source descriptions and general source-table documentation.
 - General configuration: `docs/configuration.md`
 
-## Configs that affects this rule
+## Configs that affect this rule
 - invalid_descriptions (project-wide): list of placeholder strings considered invalid for descriptions (default: `["TBD", "FILL ME OUT"]`). Source column descriptions that match these markers (case-insensitive, trimmed) are treated as missing.
 

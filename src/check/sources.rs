@@ -139,7 +139,7 @@ fn missing_source_column_descriptions(
     source: &ManifestSource,
     config: &Config,
 ) -> Option<SourceFailure> {
-    if !config.is_selected(Selector::MissingSourceTableDescriptions) {
+    if !config.is_selected(Selector::MissingSourceColumnDescriptions) {
         return None;
     }
 

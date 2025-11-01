@@ -18,7 +18,7 @@
 - Sometimes — when helpful upstream descriptions exist.
 - When you run the tool with `--fix`, it will look for matching column names in upstream models, seeds, and sources. If it finds a description, it will record a change and the writeback step will insert that description into the model's properties YAML. If no good match is found, the column is left unchanged.
 
-## Configs that affects this rule
+## Configs that affect this rule
 - render_descriptions (project-wide): controls whether descriptions are rendered inline or as doc blocks. See the general configuration docs for details (link below). This rule does not require per-rule enablement; use the selector `missing_column_descriptions` in your `select`/`exclude` lists to enable/disable it.
 - invalid_descriptions (project-wide): list of placeholder strings considered invalid for descriptions (default: `["TBD", "FILL ME OUT"]`). Columns with descriptions that match these markers (case-insensitive, trimmed) are treated as missing and may be auto-filled from upstream.
 
