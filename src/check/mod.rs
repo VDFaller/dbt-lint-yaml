@@ -4,15 +4,18 @@ use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod columns;
+mod exposures;
 mod models;
 mod sources;
 
+use exposures::check_exposures;
 use models::check_model;
 use sources::check_source;
 
 pub use crate::change_descriptors::ColumnChange;
 pub use crate::change_descriptors::{ModelChange, ModelChanges};
 pub use columns::{ColumnFailure, ColumnResult};
+pub use exposures::{ExposureChange, ExposureFailure, ExposureResult};
 pub use models::{ModelFailure, ModelResult};
 pub use sources::{SourceFailure, SourceResult};
 
@@ -33,6 +36,7 @@ impl<F, C> RuleOutcome<F, C> {
 pub struct CheckResult {
     pub models: BTreeMap<String, ModelResult>,
     pub sources: BTreeMap<String, SourceResult>,
+    pub exposures: BTreeMap<String, ExposureResult>,
     pub model_changes: BTreeMap<String, ModelChanges>,
 }
 
@@ -40,6 +44,7 @@ impl CheckResult {
     pub fn has_failures(&self) -> bool {
         self.models.values().any(ModelResult::is_failure)
             || self.sources.values().any(SourceResult::is_failure)
+            || self.exposures.values().any(|r| !r.failures.is_empty())
     }
 
     pub fn model_failures(&self) -> impl Iterator<Item = &ModelResult> {
@@ -55,6 +60,7 @@ impl CheckResult {
 pub enum CheckEvent<'a> {
     Model(&'a ModelResult),
     Source(&'a SourceResult),
+    Exposure(&'a ExposureResult),
 }
 
 pub fn check_all(manifest: &DbtManifestV12, config: &Config) -> CheckResult {
@@ -100,6 +106,13 @@ where
 
         let source_key = source_result.source_id().to_string();
         result.sources.insert(source_key, source_result);
+    }
+
+    // run exposure checks
+    for exposure_result in check_exposures(manifest, config) {
+        reporter(CheckEvent::Exposure(&exposure_result));
+        let exposure_key = exposure_result.exposure_id.to_string();
+        result.exposures.insert(exposure_key, exposure_result);
     }
 
     result
