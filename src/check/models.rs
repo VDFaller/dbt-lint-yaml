@@ -555,10 +555,9 @@ fn check_model_columns(
     let mut results: BTreeMap<String, ColumnResult> = BTreeMap::new();
     let columns = &model.__base_attr__.columns;
 
-    for (col_name, column) in columns.iter() {
+    for column in columns.iter() {
         let result = check_model_column(manifest, model, column, prior_changes, config);
-
-        results.insert(col_name.clone(), result);
+        results.insert(column.as_ref().name.clone(), result);
     }
     results
 }
@@ -605,33 +604,27 @@ mod tests {
 
         if let Some(DbtNode::Model(upstream)) = manifest.nodes.get_mut("model.test.upstream") {
             upstream.__common_attr__.unique_id = "model.test.upstream".to_string();
-            upstream
-                .__base_attr__
-                .columns
-                .insert("customer_id".to_string(), {
-                    let column = DbtColumn {
-                        name: "customer_id".to_string(),
-                        description: Some("Upstream description".to_string()),
-                        ..Default::default()
-                    };
-                    Arc::new(column)
-                });
+            upstream.__base_attr__.columns.push({
+                let column = DbtColumn {
+                    name: "customer_id".to_string(),
+                    description: Some("Upstream description".to_string()),
+                    ..Default::default()
+                };
+                Arc::new(column)
+            });
         }
 
         if let Some(DbtNode::Model(downstream)) = manifest.nodes.get_mut("model.test.downstream") {
             downstream.__common_attr__.unique_id = "model.test.downstream".to_string();
             downstream.__base_attr__.depends_on.nodes = vec!["model.test.upstream".to_string()];
-            downstream
-                .__base_attr__
-                .columns
-                .insert("customer_id".to_string(), {
-                    let column = DbtColumn {
-                        name: "customer_id".to_string(),
-                        description: None,
-                        ..Default::default()
-                    };
-                    Arc::new(column)
-                });
+            downstream.__base_attr__.columns.push({
+                let column = DbtColumn {
+                    name: "customer_id".to_string(),
+                    description: None,
+                    ..Default::default()
+                };
+                Arc::new(column)
+            });
         }
 
         manifest

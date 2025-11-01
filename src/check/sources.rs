@@ -143,9 +143,10 @@ fn missing_source_column_descriptions(
         return None;
     }
 
+    // `columns` is now a Vec<Arc<DbtColumn>>; iterate and check each column
     let has_missing = source
         .columns
-        .values()
+        .iter()
         .any(|col| missing_description(col, config).is_some());
 
     has_missing.then_some(SourceFailure::SourceTableColumnDescriptions)
@@ -389,7 +390,7 @@ mod tests {
             description: None,
             ..Default::default()
         };
-        source.columns.insert("id".to_string(), Arc::new(col));
+        source.columns.push(Arc::new(col));
 
         let config = Config {
             select: vec![Selector::MissingSourceColumnDescriptions],
@@ -415,7 +416,7 @@ mod tests {
             description: Some("identifier".to_string()),
             ..Default::default()
         };
-        source.columns.insert("id".to_string(), Arc::new(col));
+        source.columns.push(Arc::new(col));
 
         let config = Config::default();
         assert!(missing_source_column_descriptions(&source, &config).is_none());

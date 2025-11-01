@@ -31,22 +31,30 @@ pub(crate) fn get_upstream_col_desc(
                 .nodes
                 .get(upstream_id)
                 .and_then(|upstream_node| match upstream_node {
-                    DbtNode::Model(upstream_model) => {
-                        upstream_model.__base_attr__.columns.get(col_name)
-                    }
-                    DbtNode::Seed(upstream_seed) => {
-                        upstream_seed.__base_attr__.columns.get(col_name)
-                    }
-                    DbtNode::Snapshot(upstream_snapshot) => {
-                        upstream_snapshot.__base_attr__.columns.get(col_name)
-                    }
+                    DbtNode::Model(upstream_model) => upstream_model
+                        .__base_attr__
+                        .columns
+                        .iter()
+                        .find(|c| c.name == col_name)
+                        .cloned(),
+                    DbtNode::Seed(upstream_seed) => upstream_seed
+                        .__base_attr__
+                        .columns
+                        .iter()
+                        .find(|c| c.name == col_name)
+                        .cloned(),
+                    DbtNode::Snapshot(upstream_snapshot) => upstream_snapshot
+                        .__base_attr__
+                        .columns
+                        .iter()
+                        .find(|c| c.name == col_name)
+                        .cloned(),
                     _ => None,
                 })
                 .or_else(|| {
-                    manifest
-                        .sources
-                        .get(upstream_id)
-                        .and_then(|source| source.columns.get(col_name))
+                    manifest.sources.get(upstream_id).and_then(|source| {
+                        source.columns.iter().find(|c| c.name == col_name).cloned()
+                    })
                 })
         })
         .filter_map(|dep_col| {
@@ -237,10 +245,10 @@ mod tests {
             .get_mut("source.jaffle_shop.customers")
             .expect("source should exist")
             .columns
-            .insert(
-                "customer_id".to_string(),
-                column_with_description("customer_id", "Customer id from source"),
-            );
+            .push(column_with_description(
+                "customer_id",
+                "Customer id from source",
+            ));
 
         match manifest
             .nodes
@@ -248,10 +256,9 @@ mod tests {
             .expect("seed should exist")
         {
             DbtNode::Seed(seed) => {
-                seed.__base_attr__.columns.insert(
-                    "payment_id".to_string(),
-                    column_without_description("payment_id"),
-                );
+                seed.__base_attr__
+                    .columns
+                    .push(column_without_description("payment_id"));
             }
             _ => unreachable!(),
         }
@@ -262,10 +269,10 @@ mod tests {
             .expect("snapshot should exist")
         {
             DbtNode::Snapshot(snapshot) => {
-                snapshot.__base_attr__.columns.insert(
-                    "customer_id".to_string(),
-                    column_with_description("customer_id", "Customer id from snapshot"),
-                );
+                snapshot.__base_attr__.columns.push(column_with_description(
+                    "customer_id",
+                    "Customer id from snapshot",
+                ));
             }
             _ => unreachable!(),
         }
@@ -292,10 +299,10 @@ mod tests {
                     "model.jaffle_shop.base_customers".to_string(),
                     "seed.jaffle_shop.payments".to_string(),
                 ];
-                model.__base_attr__.columns.insert(
-                    "customer_id".to_string(),
-                    column_with_description("customer_id", "Customer id from manifest"),
-                );
+                model.__base_attr__.columns.push(column_with_description(
+                    "customer_id",
+                    "Customer id from manifest",
+                ));
             }
             _ => unreachable!(),
         }
@@ -409,7 +416,7 @@ mod tests {
                 model
                     .__base_attr__
                     .columns
-                    .insert("col".to_string(), column_with_description("col", "TBD"));
+                    .push(column_with_description("col", "TBD"));
             }
             _ => unreachable!(),
         }
@@ -445,10 +452,7 @@ mod tests {
             .get_mut("source.test.src")
             .unwrap()
             .columns
-            .insert(
-                "col".to_string(),
-                column_with_description("col", "FILL ME OUT"),
-            );
+            .push(column_with_description("col", "FILL ME OUT"));
 
         // downstream model depends on the source
         manifest.nodes.insert(

@@ -169,11 +169,7 @@ async fn main() -> FsResult<()> {
     let _cts = CancellationTokenSource::new();
     let token = _cts.token();
 
-    let (dbt_state, threads, _) = load(&load_args, &invocation_args, &token).await?;
-
-    let eval_args = eval_args
-        .with_target(dbt_state.dbt_profile.target.to_string())
-        .with_threads(threads);
+    let (dbt_state, _threads, _) = load(&load_args, &invocation_args, &token).await?;
 
     let resolve_args = ResolveArgs::try_from_eval_args(&eval_args)?;
     let invocation_args = InvocationArgs::from_eval_args(&eval_args);
