@@ -1,5 +1,5 @@
 use super::WriteBackError;
-use super::doc::{ModelDoc, ModelsRoot};
+use super::properties::{ModelProperty, PropertyFile};
 use crate::change_descriptors::{ColumnChange, ModelChange};
 use std::path::Path;
 
@@ -13,7 +13,7 @@ pub trait ExecutableChange {
     /// mutations against `root` and any filesystem effects using `project_root`.
     fn apply_with_fs(
         &self,
-        root: &mut ModelsRoot,
+        root: &mut PropertyFile,
         project_root: &Path,
     ) -> Result<Vec<String>, WriteBackError>;
 }
@@ -27,7 +27,7 @@ impl ColumnChange {
     /// Apply this change directly against a `ModelDoc` (in-memory).
     pub fn apply_to_model_doc(
         &self,
-        model: &mut ModelDoc,
+        model: &mut ModelProperty,
         model_id: &str,
     ) -> Result<bool, crate::writeback::WriteBackError> {
         match self {
@@ -52,7 +52,7 @@ impl ColumnChange {
 impl ExecutableChange for ColumnChange {
     fn apply_with_fs(
         &self,
-        root: &mut ModelsRoot,
+        root: &mut PropertyFile,
         _project_root: &Path,
     ) -> Result<Vec<String>, WriteBackError> {
         match self {
@@ -83,7 +83,7 @@ impl ExecutableChange for ColumnChange {
 impl ExecutableChange for ModelChange {
     fn apply_with_fs(
         &self,
-        _root: &mut ModelsRoot,
+        _root: &mut PropertyFile,
         project_root: &Path,
     ) -> Result<Vec<String>, WriteBackError> {
         match self {
@@ -147,20 +147,20 @@ impl ExecutableChange for ModelChange {
 mod tests {
     use super::*;
     use crate::change_descriptors::ColumnChange;
-    use crate::writeback::doc::{ColumnDoc, ModelDoc, ModelsRoot};
+    use crate::writeback::properties::{ColumnProperty, ModelProperty, PropertyFile};
     use std::collections::BTreeMap;
 
     #[test]
     fn column_change_updates_existing_column() {
-        let mut root = ModelsRoot {
+        let mut root = PropertyFile {
             models: Some(Vec::new()),
             sources: None,
             extras: BTreeMap::new(),
         };
-        root.models.as_mut().unwrap().push(ModelDoc {
+        root.models.as_mut().unwrap().push(ModelProperty {
             name: Some("test_model".to_string()),
             description: None,
-            columns: vec![ColumnDoc {
+            columns: vec![ColumnProperty {
                 name: "col_a".to_string(),
                 description: Some("old".to_string()),
                 extras: BTreeMap::new(),
@@ -196,12 +196,12 @@ mod tests {
 
     #[test]
     fn column_change_appends_missing_column() {
-        let mut root = ModelsRoot {
+        let mut root = PropertyFile {
             models: Some(Vec::new()),
             sources: None,
             extras: BTreeMap::new(),
         };
-        root.models.as_mut().unwrap().push(ModelDoc {
+        root.models.as_mut().unwrap().push(ModelProperty {
             name: Some("test_model".to_string()),
             description: None,
             columns: vec![],
@@ -250,7 +250,7 @@ mod tests {
         };
 
         // Apply the model change with project_root set to the temp dir
-        let mut root = ModelsRoot {
+        let mut root = PropertyFile {
             models: Some(Vec::new()),
             sources: None,
             extras: BTreeMap::new(),

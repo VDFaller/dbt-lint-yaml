@@ -9,6 +9,7 @@ This folder documents the user-facing rules you can enable or disable in `dbt-li
 - [missing_model_tags](missing_model_tags.md) — Missing model tags
 - [missing_source_descriptions](missing_source_descriptions.md) — Missing source descriptions
 - [missing_source_table_descriptions](missing_source_table_descriptions.md) — Missing source table descriptions
+- [missing_source_column_descriptions](missing_source_column_descriptions.md) — Missing source column descriptions
 - [direct_join_to_source](direct_join_to_source.md) — Direct join to source
 - [missing_properties_file](missing_properties_file.md) — Missing properties file
 - [duplicate_sources](duplicate_sources.md) — Duplicate sources

@@ -30,6 +30,9 @@ Top-level keys in `dbt-lint.toml` map to runtime options and selectors. Common k
 - `required_tests`: list of tests required
 - `render_descriptions`: boolean, if false, descriptions will keep their raw jinja format.
 - `writeback`: method for writeback ("python" or "rust")
+- `invalid_descriptions`: array of strings considered invalid placeholders for descriptions
+  (default: `["TBD", "FILL ME OUT"]`). Matching is case-insensitive and trimmed, so
+  values like `"tbd"`, `"  FILL ME OUT  "` will be treated as missing descriptions.
 
 All supported keys are validated; typos will be rejected with helpful suggestions.
 

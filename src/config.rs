@@ -28,6 +28,7 @@ pub enum Selector {
     MissingModelTags,
     MissingSourceDescriptions,
     MissingSourceTableDescriptions,
+    MissingSourceColumnDescriptions,
     DirectJoinToSource,
     #[strum(props(fixable = "true"))]
     MissingPropertiesFile,
@@ -185,6 +186,8 @@ pub struct Config {
     pub model_fanout_threshold: usize,
     #[serde(default)]
     pub required_tests: Vec<String>,
+    #[serde(default = "default_invalid_descriptions")]
+    pub invalid_descriptions: Vec<String>,
     #[serde(default)]
     pub render_descriptions: bool,
     #[serde(default = "default_writeback")]
@@ -213,6 +216,7 @@ impl Default for Config {
             project_dir: None,
             model_fanout_threshold: default_model_fanout_threshold(),
             required_tests: Vec::new(),
+            invalid_descriptions: default_invalid_descriptions(),
             render_descriptions: false,
             writeback: default_writeback(),
         }
@@ -258,6 +262,10 @@ fn default_fixable() -> Vec<Selector> {
     Selector::iter()
         .filter(|s| s.get_str("fixable") == Some("true"))
         .collect()
+}
+
+fn default_invalid_descriptions() -> Vec<String> {
+    vec!["TBD".to_string(), "FILL ME OUT".to_string()]
 }
 
 fn validate_keys(table: &toml::value::Table) -> Result<(), ConfigError> {

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::Path};
 use thiserror::Error;
 
 pub mod changes;
-pub mod doc;
+pub mod properties;
 pub mod python;
 pub mod rust;
 

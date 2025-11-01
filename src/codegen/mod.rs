@@ -9,23 +9,23 @@ use std::path::{Path, PathBuf};
 // of column-chunk metadata and prefer file-level and schema-level metadata for descriptions.
 use dbt_schemas::schemas::manifest::ManifestModel;
 
-use crate::writeback::doc::{ColumnDoc, ModelDoc, ModelsRoot};
+use crate::writeback::properties::{ColumnProperty, ModelProperty, PropertyFile};
 
 fn generate_model(
     model: &ManifestModel,
     project_root: Option<&Path>,
-) -> Result<ModelsRoot, Box<dyn std::error::Error>> {
+) -> Result<PropertyFile, Box<dyn std::error::Error>> {
     let parquet_path = get_cached_parquet_path(model, project_root);
     let columns = get_columns_from_parquet(&parquet_path)?;
 
-    let model_doc = ModelDoc {
+    let model_doc = ModelProperty {
         name: Some(model.__common_attr__.name.clone()),
         description: model.__common_attr__.description.clone(),
         columns,
         extras: std::collections::BTreeMap::new(),
     };
 
-    let models_root = ModelsRoot {
+    let models_root = PropertyFile {
         models: Some(vec![model_doc]),
         sources: None,
         extras: std::collections::BTreeMap::new(),
@@ -54,15 +54,17 @@ fn get_cached_parquet_path(model: &ManifestModel, project_root: Option<&Path>) -
     ))
 }
 
-fn get_columns_from_parquet(path: &PathBuf) -> Result<Vec<ColumnDoc>, Box<dyn std::error::Error>> {
+fn get_columns_from_parquet(
+    path: &PathBuf,
+) -> Result<Vec<ColumnProperty>, Box<dyn std::error::Error>> {
     let file = std::fs::File::open(path)?;
     let reader = SerializedFileReader::new(file)?;
     let metadata = reader.metadata();
     let schema_descr = metadata.file_metadata().schema_descr();
-    let columns: Vec<ColumnDoc> = (0..schema_descr.num_columns())
+    let columns: Vec<ColumnProperty> = (0..schema_descr.num_columns())
         .map(|i| {
             let col = schema_descr.column(i);
-            ColumnDoc {
+            ColumnProperty {
                 name: col.name().to_string(),
                 description: None,
                 extras: std::collections::BTreeMap::new(),

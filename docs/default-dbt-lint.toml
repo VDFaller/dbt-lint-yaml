@@ -4,6 +4,7 @@ select = [
     "missing_model_tags",
     "missing_source_descriptions",
     "missing_source_table_descriptions",
+    "missing_source_column_descriptions",
     "direct_join_to_source",
     "missing_properties_file",
     "duplicate_sources",
@@ -25,3 +26,4 @@ model_fanout_threshold = 3
 required_tests = []
 render_descriptions = false
 writeback = "python"
+invalid_descriptions = ["TBD", "FILL ME OUT"]
