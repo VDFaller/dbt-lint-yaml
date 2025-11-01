@@ -20,6 +20,13 @@ sources:
           loaded_at_field: ordered_at
       - name: raw_items
         description: Items included in an order
+        columns:
+          - name: id
+            description: The unique key for each order item.
+          - name: order_id
+            description: "{{doc('order_id')}}"
+          - name: sku
+            description: The product that was ordered.
       - name: raw_stores
         config:
           loaded_at_field: opened_at

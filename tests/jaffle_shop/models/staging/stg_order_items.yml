@@ -8,7 +8,7 @@ models:
           - not_null
           - unique
       - name: order_id
-        description: "{{doc('order_id')}}"
+        description: TBD  # should be overwritten
         data_tests:
           - not_null
           - relationships:
