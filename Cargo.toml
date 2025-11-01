@@ -11,52 +11,55 @@ default = []
 write-default-config = []
 
 [dependencies]
-dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
-dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
-dbt-common = { package = "dbt-common", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
-dbt-jinja-utils = { package = "dbt-jinja-utils", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
-dbt-loader = { package = "dbt-loader", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
-dbt-parser = { package = "dbt-parser", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
-dbt-sa-cli = { package = "dbt-sa-cli", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
-minijinja = { package = "minijinja", git = "https://github.com/dbt-labs/dbt-fusion", rev = "f8dda7da5d4c9c7f845613c9aebcbf1f523c0360" }
+# non fusion packages/dependencies
+strsim = "0.11"
+struct-field-names-as-array = "0.3.0"
+
+# fusion packages
+dbt-schemas = { package = "dbt-schemas", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
+dbt-dag = { package = "dbt-dag", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
+dbt-common = { package = "dbt-common", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
+dbt-jinja-utils = { package = "dbt-jinja-utils", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
+dbt-loader = { package = "dbt-loader", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
+dbt-parser = { package = "dbt-parser", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
+dbt-sa-cli = { package = "dbt-sa-cli", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
+minijinja = { package = "minijinja", git = "https://github.com/dbt-labs/dbt-fusion", rev = "33b0e0d5b85b21691f7e06bd7138d801bf4119f7" }
 dbt-serde_yaml = { git = "https://github.com/sdf-labs/dbt-serde-yaml", rev = "9ccae3e49f77fcd0a92230a1e41c51d74279409f", features = [
   "filename",
   "schemars",
   "flatten_dunder",
 ] }
-tokio = { version = "1.41.1", features = [
-  "fs",
-  "io-util",
-  "macros",
-  "net",
-  "process",
-  "rt-multi-thread",
-  "signal",
-  "sync",
-  "time",
-] }
 
-serde_json = "1.0.133"
-serde_with = "3.12.0"
+# Fusion dependencies, keeping them as open as possible
+tokio = "~1"
+serde_json = "~1"
+serde_with = "~3"
+clap = "~4"
+serde = "~1"
+thiserror = "~1"
+toml = "~0.9"
+strum = "~0.27"
+parquet = { git = "https://github.com/sdf-labs/arrow-rs", package = "parquet", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
 
-clap = { version = "4.4.4", features = ["derive"] }
-serde = { version = "1.0.147", default-features = false, features = ["derive"] }
-thiserror = "1.0"
-toml = "0.9.7"
-strsim = "0.11"
-struct-field-names-as-array = "0.3.0"
-strum = { version = "0.27.2", features = ["derive"] }
-arrow = { version = "=55.1.0", features = ["prettyprint"] }
-arrow-array = { version = "=55.1.0" }
-arrow-buffer = { version = "=55.1.0" }
-arrow-csv = { version = "=55.1.0" }
-arrow-data = { version = "=55.1.0" }
-arrow-ipc = { version = "=55.1.0" }
-arrow-json = { version = "=55.1.0" }
-arrow-schema = { version = "=55.1.0", features = ["serde"] }
-parquet = { version = "=55.1.0" }
-serde_arrow = { version = "0.13.4", features = ["arrow-55"] }
-base64 = "0.21"
+[patch.crates-io]
+
+# Map Arrow-family crates to the sdf-labs/arrow-rs fork used by dbt-fusion @ 33b0e0d5
+arrow = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-array = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-arith = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-buffer = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-cast = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-csv = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-data = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-ipc = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-json = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-ord = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-row = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-schema = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-select = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+arrow-string = { git = "https://github.com/sdf-labs/arrow-rs", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+parquet = { git = "https://github.com/sdf-labs/arrow-rs", package = "parquet", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+ 
 
 [[bin]]
 name = "write-default-config"
@@ -74,4 +77,3 @@ push = true
 push-remote = "origin"
 sign-tag = true
 sign-commit = true
-
