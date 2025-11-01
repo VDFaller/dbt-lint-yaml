@@ -20,6 +20,7 @@
 
 ## Configs that affects this rule
 - render_descriptions (project-wide): controls whether descriptions are rendered inline or as doc blocks. See the general configuration docs for details (link below). This rule does not require per-rule enablement; use the selector `missing_column_descriptions` in your `select`/`exclude` lists to enable/disable it.
+- invalid_descriptions (project-wide): list of placeholder strings considered invalid for descriptions (default: `["TBD", "FILL ME OUT"]`). Columns with descriptions that match these markers (case-insensitive, trimmed) are treated as missing and may be auto-filled from upstream.
 
 ## Notes
 - This rule only inserts descriptions when a confident upstream match exists. It will not invent free-text descriptions.

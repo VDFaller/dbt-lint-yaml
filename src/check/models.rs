@@ -232,7 +232,7 @@ fn check_model_column(
     let mut changes: Vec<ColumnChange> = Vec::new();
 
     if config.is_selected(Selector::MissingColumnDescriptions)
-        && let Some(failure) = columns::missing_description(column)
+        && let Some(failure) = columns::missing_description(column, config)
     {
         // Attempt to fix the missing description
         if !config.is_fixable(Selector::MissingColumnDescriptions) {
@@ -271,12 +271,31 @@ fn check_model_column(
     }
 }
 
-/// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
+/// Check if a model is missing a description.
+/// A description is considered missing if it is:
+/// - None
+/// - An empty string (after trimming)
+/// - Matches any of the configured invalid descriptions (case-insensitive, after trimming)
 fn missing_model_description(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
     if !config.is_selected(Selector::MissingModelDescriptions) {
         return None;
     }
-    (model.__common_attr__.description.is_none()).then_some(ModelFailure::DescriptionMissing)
+    let is_missing = match model.__common_attr__.description.as_ref() {
+        None => true,
+        Some(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                true
+            } else {
+                config
+                    .invalid_descriptions
+                    .iter()
+                    .any(|bad| bad.eq_ignore_ascii_case(trimmed))
+            }
+        }
+    };
+
+    is_missing.then_some(ModelFailure::DescriptionMissing)
 }
 
 fn missing_model_tags(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
@@ -719,6 +738,15 @@ mod tests {
         ];
         let config = Config::default();
         assert!(direct_join_to_source(&model, &config).is_some());
+    }
+
+    #[test]
+    fn test_missing_model_description_invalid_marker() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.description = Some("FILL ME OUT".to_string());
+
+        let config = Config::default();
+        assert!(missing_model_description(&model, &config).is_some());
     }
 
     #[test]

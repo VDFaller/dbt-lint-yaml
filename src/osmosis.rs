@@ -49,7 +49,21 @@ pub(crate) fn get_upstream_col_desc(
                         .and_then(|source| source.columns.get(col_name))
                 })
         })
-        .filter_map(|dep_col| dep_col.as_ref().description.as_ref().cloned())
+        .filter_map(|dep_col| {
+            dep_col.as_ref().description.as_ref().and_then(|d| {
+                let trimmed = d.trim();
+                if trimmed.is_empty()
+                    || config
+                        .invalid_descriptions
+                        .iter()
+                        .any(|bad| bad.eq_ignore_ascii_case(trimmed))
+                {
+                    None
+                } else {
+                    Some(d.clone())
+                }
+            })
+        })
         .next();
 
     if config.render_descriptions {
@@ -373,6 +387,88 @@ mod tests {
             &Config::default(),
         );
 
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn does_not_propagate_invalid_upstream_model_description() {
+        let mut manifest = DbtManifestV12::default();
+
+        manifest.nodes.insert(
+            "model.upstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        manifest.nodes.insert(
+            "model.downstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+
+        // upstream column has a placeholder description
+        match manifest.nodes.get_mut("model.upstream").unwrap() {
+            DbtNode::Model(model) => {
+                model
+                    .__base_attr__
+                    .columns
+                    .insert("col".to_string(), column_with_description("col", "TBD"));
+            }
+            _ => unreachable!(),
+        }
+
+        // downstream depends on upstream
+        match manifest.nodes.get_mut("model.downstream").unwrap() {
+            DbtNode::Model(model) => {
+                model.__base_attr__.depends_on.nodes = vec!["model.upstream".to_string()];
+            }
+            _ => unreachable!(),
+        }
+
+        let result = get_upstream_col_desc(
+            &manifest,
+            None,
+            "model.downstream",
+            "col",
+            &Config::default(),
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn does_not_propagate_invalid_upstream_source_description() {
+        let mut manifest = DbtManifestV12::default();
+
+        // create a source with a placeholder column description
+        manifest
+            .sources
+            .insert("source.test.src".to_string(), Default::default());
+        manifest
+            .sources
+            .get_mut("source.test.src")
+            .unwrap()
+            .columns
+            .insert(
+                "col".to_string(),
+                column_with_description("col", "FILL ME OUT"),
+            );
+
+        // downstream model depends on the source
+        manifest.nodes.insert(
+            "model.downstream".to_string(),
+            DbtNode::Model(Default::default()),
+        );
+        match manifest.nodes.get_mut("model.downstream").unwrap() {
+            DbtNode::Model(model) => {
+                model.__base_attr__.depends_on.nodes = vec!["source.test.src".to_string()];
+            }
+            _ => unreachable!(),
+        }
+
+        let result = get_upstream_col_desc(
+            &manifest,
+            None,
+            "model.downstream",
+            "col",
+            &Config::default(),
+        );
         assert!(result.is_none());
     }
 
