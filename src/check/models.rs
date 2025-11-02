@@ -28,6 +28,7 @@ pub enum ModelFailure {
     MultipleSourcesJoined(Vec<String>),
     RejoiningOfUpstreamConcepts(Vec<String>),
     PublicModelWithoutContract,
+    DeadModel,
     ModelSeparateFromPropertiesFile {
         patch_path: PathBuf,
         original_file_path: PathBuf,
@@ -179,6 +180,9 @@ pub(crate) fn check_model(
         failures.push(f)
     }
     if let Some(f) = rejoining_of_upstream_concepts(manifest, model_meta, config) {
+        failures.push(f)
+    }
+    if let Err(f) = dead_model(model_meta, manifest, config) {
         failures.push(f)
     }
     match model_separate_from_properties_file(node, config) {
@@ -582,6 +586,36 @@ fn model_type(model: &ManifestModel) -> &str {
     }
 }
 
+/// A model is considered dead if it has no downstream dependencies.
+/// Tests, Unit tests, do not count as dependencies
+fn dead_model(
+    model: &ManifestModel,
+    manifest: &DbtManifestV12,
+    config: &Config,
+) -> Result<(), ModelFailure> {
+    if !config.is_selected(Selector::DeadModel) {
+        return Ok(());
+    }
+    // A model is considered dead if no other models depend on it
+    let model_id = &model.__common_attr__.unique_id;
+    let child_map = &manifest.child_map;
+    let is_dead = match child_map.get(model_id) {
+        None => true,
+        Some(children) => {
+            let downstream_models: Vec<&String> = children
+                .iter()
+                .filter(|id| !id.starts_with("test.") && !id.starts_with("unit_test."))
+                .collect();
+            downstream_models.is_empty()
+        }
+    };
+    if is_dead {
+        Err(ModelFailure::DeadModel)
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -907,5 +941,30 @@ mod tests {
             ..Default::default()
         };
         assert!(public_model_without_contract(&model, &config).is_some());
+    }
+
+    #[test]
+    fn test_dead_model_detected_when_no_downstreams() {
+        let mut manifest = DbtManifestV12::default();
+        let model_id = "model.test.alone".to_string();
+        manifest
+            .nodes
+            .insert(model_id.clone(), DbtNode::Model(Default::default()));
+
+        if let Some(DbtNode::Model(model)) = manifest.nodes.get_mut(&model_id) {
+            model.__common_attr__.unique_id = model_id.clone();
+        } else {
+            panic!("expected model to be inserted");
+        }
+
+        let model = match manifest.nodes.get(&model_id) {
+            Some(DbtNode::Model(model)) => model,
+            _ => panic!("expected model node"),
+        };
+        let config = Config {
+            select: vec![Selector::DeadModel],
+            ..Default::default()
+        };
+        assert!(dead_model(model, &manifest, &config).is_err());
     }
 }
