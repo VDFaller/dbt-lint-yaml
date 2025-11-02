@@ -6,10 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::BTreeMap;
 
-use dbt_schemas::schemas::{
-    dbt_column::DbtColumnRef,
-    manifest::{DbtManifestV12, DbtNode, ManifestModel},
-};
+use dbt_schemas::schemas::{dbt_column::DbtColumnRef, manifest::ManifestModel};
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ColumnProperty {
@@ -69,7 +66,10 @@ impl ModelProperty {
     }
 }
 
-pub fn model_property_from_manifest_differences(original: &ManifestModel, updated: &ManifestModel) -> Option<ModelProperty> {
+pub fn model_property_from_manifest_differences(
+    original: &ManifestModel,
+    updated: &ManifestModel,
+) -> Option<ModelProperty> {
     let mut model_prop = ModelProperty {
         name: Some(original.__common_attr__.name.clone()), // TODO: name shouldn't be option
         description: None,
@@ -81,7 +81,6 @@ pub fn model_property_from_manifest_differences(original: &ManifestModel, update
         has_change = true;
         model_prop.description = updated.__common_attr__.description.clone();
     }
-
 
     let mut original_columns_map: BTreeMap<String, &DbtColumnRef> = BTreeMap::new();
     for col in &original.__base_attr__.columns {

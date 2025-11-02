@@ -20,6 +20,8 @@ struct PythonRequest<'a> {
     patch_path: &'a Path,
     model_name: &'a str,
     column_changes: Vec<PythonColumnChange<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_description: Option<&'a str>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +56,8 @@ pub fn apply_with_python(
             project_root.join(patch_path)
         };
 
+        let mut model_description_change: Option<String> = None;
+
         for change in &model_changes.changes {
             match change {
                 ModelChange::MovePropertiesFile {
@@ -71,6 +75,24 @@ pub fn apply_with_python(
                     }
                     std::fs::rename(&resolved_path, &new_resolved_path)?;
                     resolved_path = new_resolved_path;
+                }
+                ModelChange::ChangePropertiesFile {
+                    patch_path,
+                    property,
+                    ..
+                } => {
+                    if patch_path.is_none() {
+                        eprintln!(
+                            "Skipping unsupported model-level change for `{}` in python writeback",
+                            model_changes.model_id
+                        );
+                        continue;
+                    }
+                    if let Some(prop) = property
+                        && let Some(desc) = prop.description.as_ref()
+                    {
+                        model_description_change = Some(desc.clone());
+                    }
                 }
                 other => {
                     return Err(WriteBackError::UnsupportedModelChange {
@@ -97,7 +119,7 @@ pub fn apply_with_python(
             }
         }
 
-        if column_changes.is_empty() {
+        if column_changes.is_empty() && model_description_change.is_none() {
             if !model_changes.changes.is_empty() {
                 results.push((model_changes.model_id.clone(), Vec::new()));
             }
@@ -108,6 +130,7 @@ pub fn apply_with_python(
             patch_path: &resolved_path,
             model_name,
             column_changes,
+            model_description: model_description_change.as_deref(),
         };
 
         let response = invoke_python_helper(&helper_path, &request)?;

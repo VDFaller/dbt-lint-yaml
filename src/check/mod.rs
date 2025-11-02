@@ -19,20 +19,7 @@ pub use exposures::{ExposureChange, ExposureFailure, ExposureResult};
 pub use models::{ModelFailure, ModelResult};
 pub use sources::{SourceFailure, SourceResult};
 
-#[derive(Debug, Clone)]
-pub enum RuleOutcome<F, C> {
-    Pass,
-    Fail(F),
-    Change(C),
-}
-
-impl<F, C> RuleOutcome<F, C> {
-    pub fn is_pass(&self) -> bool {
-        matches!(self, Self::Pass)
-    }
-}
-
-#[derive(Default, Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct CheckResult {
     pub models: BTreeMap<String, ModelResult>,
     pub sources: BTreeMap<String, SourceResult>,
@@ -216,17 +203,21 @@ mod tests {
         .with_fix(true);
         let result = check_all(&manifest, &config);
 
-        assert_eq!(result.model_changes.len(), 1);
+        assert_eq!(result.model_changes.len(), 2);
         assert!(result.model_changes.contains_key("model.test.downstream"));
+        assert!(result.model_changes.contains_key("model.test.upstream"));
         let model_result = result
             .models
             .get("model.test.downstream")
             .expect("model result should be tracked");
-        assert!(model_result.is_failure());
+        assert!(model_result.is_pass(), "downstream model should be fixed");
         assert!(
             model_result
-                .failures()
-                .contains(&ModelFailure::DescriptionMissing)
+                .changes()
+                .expect("changes should be recorded")
+                .column_changes
+                .contains_key("customer_id"),
+            "column change should be present"
         );
     }
 }

@@ -31,6 +31,9 @@ pub enum ModelChange {
         new_path: PathBuf,
     },
     ChangePropertiesFile {
+        model_id: String,
+        model_name: String,
+        patch_path: Option<PathBuf>,
         property: Option<ModelProperty>,
     },
 }

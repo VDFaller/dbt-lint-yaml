@@ -35,6 +35,7 @@ pub fn apply_with_rust(
         let mut docs: PropertyFile = dbt_serde_yaml::from_str(&yaml_str)?;
 
         let mut updated_columns = Vec::new();
+        let mut file_mutated = false;
 
         // Ask the ModelChanges to produce executable writeback ops (columns + model-level)
         let ops: Vec<Box<dyn ExecutableChange>> = model_changes.to_writeback_ops();
@@ -43,17 +44,20 @@ pub fn apply_with_rust(
         for op in ops.iter() {
             let mutated = op.apply_with_fs(&mut docs, project_root)?;
             if !mutated.is_empty() {
+                file_mutated = true;
                 updated_columns.extend(mutated);
             }
         }
 
         // Persist YAML if we mutated in-memory docs
-        if !updated_columns.is_empty() {
+        if file_mutated {
             let out_str = dbt_serde_yaml::to_string(&docs)?;
             std::fs::write(&resolved_path, out_str)?;
         }
 
-        if !updated_columns.is_empty() {
+        if file_mutated {
+            // Filter out synthetic markers before reporting.
+            updated_columns.retain(|label| !label.starts_with("@model:"));
             results.push((model_changes.model_id.clone(), updated_columns));
         } else if !model_changes.changes.is_empty() {
             results.push((model_changes.model_id.clone(), Vec::new()));

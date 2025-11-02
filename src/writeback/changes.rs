@@ -83,7 +83,7 @@ impl ExecutableChange for ColumnChange {
 impl ExecutableChange for ModelChange {
     fn apply_with_fs(
         &self,
-        _root: &mut PropertyFile,
+        root: &mut PropertyFile,
         project_root: &Path,
     ) -> Result<Vec<String>, WriteBackError> {
         match self {
@@ -112,6 +112,28 @@ impl ExecutableChange for ModelChange {
                 }
                 std::fs::rename(&src, &dst)?;
                 Ok(Vec::new())
+            }
+            ModelChange::ChangePropertiesFile {
+                model_name,
+                property,
+                ..
+            } => {
+                let Some(prop) = property else {
+                    return Ok(Vec::new());
+                };
+
+                if let Some(existing) = root.find_model_mut(model_name) {
+                    existing.merge(prop);
+                } else {
+                    let mut new_prop = prop.clone();
+                    if new_prop.name.is_none() {
+                        new_prop.name = Some(model_name.clone());
+                    }
+                    root.models.get_or_insert_with(Vec::new).push(new_prop);
+                }
+
+                // Return synthetic entry to signal the YAML should be rewritten.
+                Ok(vec![format!("@model:{model_name}")])
             }
             ModelChange::MoveModelFile {
                 patch_path,
