@@ -45,9 +45,11 @@ pub enum Selector {
     RejoiningOfUpstreamConcepts,
     SourceFanout,
     PublicModelsWithoutContract,
+    #[strum(props(default = false))]
+    DeadModel,
     // this is fixable, but right now it doesn't work right
     // if two models have the same patch path
-    #[strum(props(fixable = "false"))]
+    #[strum(props(fixable = false))]
     ModelsSeparateFromPropertiesFile,
     #[strum(props(default = false))]
     ExposureDependentOnPrivateModel,

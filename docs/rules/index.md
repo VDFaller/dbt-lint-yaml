@@ -26,3 +26,4 @@ This folder documents the user-facing rules you can enable or disable in `dbt-li
 - [missing_required_tests](missing_required_tests.md) — Missing required tests (config-driven)
 - [exposure_dependent_on_private_model](exposure_dependent_on_private_model.md) — Exposure depends on private models
 - [exposure_parents_materializations](exposure_parents_materializations.md) — Exposure depends on non-materialized parent models
+- [dead_model](dead_model.md) — Dead model (has no downstream dependencies)
