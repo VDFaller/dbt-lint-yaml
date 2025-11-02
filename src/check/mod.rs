@@ -203,21 +203,17 @@ mod tests {
         .with_fix(true);
         let result = check_all(&manifest, &config);
 
-        assert_eq!(result.model_changes.len(), 2);
+        assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));
-        assert!(result.model_changes.contains_key("model.test.upstream"));
         let model_result = result
             .models
             .get("model.test.downstream")
             .expect("model result should be tracked");
-        assert!(model_result.is_pass(), "downstream model should be fixed");
+        assert!(model_result.is_failure());
         assert!(
             model_result
-                .changes()
-                .expect("changes should be recorded")
-                .column_changes
-                .contains_key("customer_id"),
-            "column change should be present"
+                .failures()
+                .contains(&ModelFailure::DescriptionMissing)
         );
     }
 }

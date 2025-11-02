@@ -1,5 +1,7 @@
+use crate::change_descriptors::{SourceChange, SourceChanges};
 use crate::check::columns::missing_description;
 use crate::config::{Config, Selector};
+use crate::writeback::properties::source_property_from_manifest_differences;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, ManifestSource};
 use std::fmt::Display;
 use strum::AsRefStr;
@@ -29,6 +31,7 @@ impl Display for SourceFailure {
 pub struct SourceResult {
     pub source_id: String,
     pub failures: Vec<SourceFailure>,
+    pub changes: Option<SourceChanges>,
 }
 
 impl SourceResult {
@@ -51,6 +54,10 @@ impl SourceResult {
     pub fn failure_reasons(&self) -> Vec<String> {
         self.failures.iter().map(ToString::to_string).collect()
     }
+
+    pub fn changes(&self) -> Option<&SourceChanges> {
+        self.changes.as_ref()
+    }
 }
 
 impl Display for SourceResult {
@@ -72,35 +79,103 @@ pub(crate) fn check_source(
     source: &ManifestSource,
     config: &Config,
 ) -> SourceResult {
-    let source_id = source.__common_attr__.unique_id.clone();
+    let mut working_source = source.clone();
+    let source_id = working_source.__common_attr__.unique_id.clone();
+    let source_name = working_source.source_name.clone();
+    let table_name = working_source.__common_attr__.name.clone();
+    let patch_path = working_source.__common_attr__.patch_path.clone();
 
     let mut failures = Vec::new();
+    let mut source_level_changes: Vec<SourceChange> = Vec::new();
+    let mut property_change_required = false;
 
-    if let Some(failure) = missing_source_table_description(source, config) {
+    match missing_source_table_description(&mut working_source, config) {
+        Ok(Some(change)) => {
+            property_change_required = true;
+            source_level_changes.push(change);
+        }
+        Ok(None) => {}
+        Err(failure) => failures.push(failure),
+    }
+
+    if let Err(failure) = missing_source_column_descriptions(&mut working_source, config) {
         failures.push(failure);
     }
-    if let Some(failure) = missing_source_column_descriptions(source, config) {
+
+    if let Err(failure) = duplicate_source(manifest, source, config) {
         failures.push(failure);
     }
-    if let Some(failure) = duplicate_source(manifest, source, config) {
+
+    if let Err(failure) = unused_source(manifest, source, config) {
         failures.push(failure);
     }
-    if let Some(failure) = unused_source(manifest, source, config) {
+
+    if let Err(failure) = missing_source_freshness(source, config) {
         failures.push(failure);
     }
-    if let Some(failure) = missing_source_freshness(source, config) {
+
+    if let Err(failure) = missing_source_description(&working_source, config) {
         failures.push(failure);
     }
-    if let Some(failure) = missing_source_description(source, config) {
+
+    if let Err(failure) = source_fanout(manifest, source, config) {
         failures.push(failure);
     }
-    if let Some(failure) = source_fanout(manifest, source, config) {
-        failures.push(failure);
+
+    let mut changes = if source_level_changes.is_empty() {
+        None
+    } else {
+        Some(SourceChanges {
+            source_id: source_id.clone(),
+            source_name: source_name.clone(),
+            table_name: table_name.clone(),
+            patch_path: patch_path.clone(),
+            changes: source_level_changes,
+        })
+    };
+
+    if config.fix && property_change_required {
+        if let Some(property) = source_property_from_manifest_differences(source, &working_source) {
+            let mut applied = false;
+            if let Some(changes_ref) = changes.as_mut() {
+                for change in &mut changes_ref.changes {
+                    match change {
+                        SourceChange::ChangePropertiesFile { property: slot, .. } => {
+                            *slot = Some(property.clone());
+                            applied = true;
+                        }
+                    }
+                }
+            }
+
+            if !applied {
+                let change = SourceChange::ChangePropertiesFile {
+                    source_id: source_id.clone(),
+                    source_name: source_name.clone(),
+                    table_name: table_name.clone(),
+                    patch_path: patch_path.clone(),
+                    property: Some(property),
+                };
+
+                if let Some(changes_ref) = changes.as_mut() {
+                    changes_ref.changes.push(change);
+                } else {
+                    changes = Some(SourceChanges {
+                        source_id: source_id.clone(),
+                        source_name: source_name.clone(),
+                        table_name: table_name.clone(),
+                        patch_path: patch_path.clone(),
+                        changes: vec![change],
+                    });
+                }
+            }
+        }
     }
 
     SourceResult {
         source_id,
         failures,
+        changes,
     }
 }
 
@@ -110,11 +185,11 @@ pub(crate) fn check_source(
 /// - An empty string (after trimming)
 /// - Matches any of the configured invalid descriptions (case-insensitive, after trimming)
 fn missing_source_table_description(
-    source: &ManifestSource,
+    source: &mut ManifestSource,
     config: &Config,
-) -> Option<SourceFailure> {
+) -> Result<Option<SourceChange>, SourceFailure> {
     if !config.is_selected(Selector::MissingSourceTableDescriptions) {
-        return None;
+        return Ok(None);
     }
     let is_missing = match source.__common_attr__.description.as_ref() {
         None => true,
@@ -131,25 +206,44 @@ fn missing_source_table_description(
         }
     };
 
-    is_missing.then_some(SourceFailure::MissingDescription)
+    if !is_missing {
+        return Ok(None);
+    }
+
+    if config.is_fixable(Selector::MissingSourceTableDescriptions) {
+        source.__common_attr__.description = Some("Auto-generated description".to_string());
+        let change = SourceChange::ChangePropertiesFile {
+            source_id: source.__common_attr__.unique_id.clone(),
+            source_name: source.source_name.clone(),
+            table_name: source.__common_attr__.name.clone(),
+            patch_path: source.__common_attr__.patch_path.clone(),
+            property: None,
+        };
+        Ok(Some(change))
+    } else {
+        Err(SourceFailure::MissingDescription)
+    }
 }
 
 /// Check that every column on a source table has a non-empty description.
 fn missing_source_column_descriptions(
-    source: &ManifestSource,
+    source: &mut ManifestSource,
     config: &Config,
-) -> Option<SourceFailure> {
+) -> Result<(), SourceFailure> {
     if !config.is_selected(Selector::MissingSourceColumnDescriptions) {
-        return None;
+        return Ok(());
     }
 
-    // `columns` is now a Vec<Arc<DbtColumn>>; iterate and check each column
     let has_missing = source
         .columns
         .iter()
         .any(|col| missing_description(col, config).is_some());
 
-    has_missing.then_some(SourceFailure::SourceTableColumnDescriptions)
+    if has_missing {
+        Err(SourceFailure::SourceTableColumnDescriptions)
+    } else {
+        Ok(())
+    }
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/documentation/#undocumented-sources
@@ -158,12 +252,13 @@ fn missing_source_column_descriptions(
 /// - None
 /// - An empty string (after trimming)
 /// - Matches any of the configured invalid descriptions (case-insensitive, after trimming)
-fn missing_source_description(source: &ManifestSource, config: &Config) -> Option<SourceFailure> {
+fn missing_source_description(
+    source: &ManifestSource,
+    config: &Config,
+) -> Result<(), SourceFailure> {
     if !config.is_selected(Selector::MissingSourceDescriptions) {
-        return None;
+        return Ok(());
     }
-    // Treat source description as missing when empty/whitespace-only or matches a configured
-    // invalid description marker (case-insensitive, trimmed).
     let trimmed = source.source_description.trim();
     let is_missing = trimmed.is_empty()
         || config
@@ -171,7 +266,10 @@ fn missing_source_description(source: &ManifestSource, config: &Config) -> Optio
             .iter()
             .any(|bad| bad.eq_ignore_ascii_case(trimmed));
 
-    is_missing.then_some(SourceFailure::MissingSourceDescription)
+    if !is_missing {
+        return Ok(());
+    }
+    Err(SourceFailure::MissingSourceDescription)
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#source-fanout
@@ -179,9 +277,9 @@ fn source_fanout(
     manifest: &DbtManifestV12,
     source: &ManifestSource,
     config: &Config,
-) -> Option<SourceFailure> {
+) -> Result<(), SourceFailure> {
     if !config.is_selected(Selector::SourceFanout) {
-        return None;
+        return Ok(());
     }
 
     let downstream_count = manifest
@@ -190,7 +288,10 @@ fn source_fanout(
         .map(|children| children.len())
         .unwrap_or(0);
 
-    (downstream_count > 1).then_some(SourceFailure::SourceFanout)
+    if downstream_count > 1 {
+        return Err(SourceFailure::SourceFanout);
+    }
+    Ok(())
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#duplicate-sources
@@ -198,22 +299,24 @@ fn duplicate_source(
     manifest: &DbtManifestV12,
     source: &ManifestSource,
     config: &Config,
-) -> Option<SourceFailure> {
+) -> Result<(), SourceFailure> {
     if !config.is_selected(Selector::DuplicateSources)
         || source.__common_attr__.name == source.identifier
     {
-        return None;
+        return Ok(());
     }
     // TODO: look into performance of this search in a larger project
-    manifest
-        .sources
-        .values()
-        .find(|s| {
-            s.identifier == source.identifier
-                && s.source_name == source.source_name
-                && s.__common_attr__.unique_id != source.__common_attr__.unique_id
-        })
-        .map(|s| SourceFailure::DuplicateDefinition(s.__common_attr__.unique_id.clone()))
+    if let Some(duplicate) = manifest.sources.values().find(|s| {
+        s.identifier == source.identifier
+            && s.source_name == source.source_name
+            && s.__common_attr__.unique_id != source.__common_attr__.unique_id
+    }) {
+        Err(SourceFailure::DuplicateDefinition(
+            duplicate.__common_attr__.unique_id.clone(),
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#unused-sources
@@ -221,10 +324,10 @@ fn unused_source(
     manifest: &DbtManifestV12,
     source: &ManifestSource,
     config: &Config,
-) -> Option<SourceFailure> {
+) -> Result<(), SourceFailure> {
     // A source is considered "used" if any model depends on it
     if !config.is_selected(Selector::UnusedSources) {
-        return None;
+        return Ok(());
     }
     let has_downstream = manifest
         .child_map
@@ -232,21 +335,26 @@ fn unused_source(
         .map(|children| !children.is_empty())
         .unwrap_or(false);
 
-    (!has_downstream).then_some(SourceFailure::UnusedSource)
+    if !has_downstream {
+        return Err(SourceFailure::UnusedSource);
+    }
+    Ok(())
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/testing/#missing-source-freshness
-fn missing_source_freshness(source: &ManifestSource, config: &Config) -> Option<SourceFailure> {
+fn missing_source_freshness(source: &ManifestSource, config: &Config) -> Result<(), SourceFailure> {
     if !config.is_selected(Selector::MissingSourceFreshness) {
-        return None;
+        return Ok(());
     }
     if let Some(freshness) = &source.freshness {
         if freshness.warn_after.is_none() && freshness.error_after.is_none() {
-            return Some(SourceFailure::MissingFreshness);
+            Err(SourceFailure::MissingFreshness)
+        } else {
+            Ok(())
         }
-        return None;
+    } else {
+        Err(SourceFailure::MissingFreshness)
     }
-    Some(SourceFailure::MissingFreshness)
 }
 
 #[cfg(test)]
@@ -268,7 +376,11 @@ mod tests {
             ..Default::default()
         };
         let config = Config::default();
-        assert!(missing_source_description(&source, &config).is_some());
+        let result = missing_source_description(&source, &config);
+        assert!(matches!(
+            result,
+            Err(SourceFailure::MissingSourceDescription)
+        ));
     }
 
     #[test]
@@ -279,7 +391,11 @@ mod tests {
         };
 
         let config = Config::default();
-        assert!(missing_source_description(&source, &config).is_some());
+        let result = missing_source_description(&source, &config);
+        assert!(matches!(
+            result,
+            Err(SourceFailure::MissingSourceDescription)
+        ));
     }
 
     #[test]
@@ -304,10 +420,10 @@ mod tests {
             duplicate.clone(),
         );
 
-        let failure = duplicate_source(&manifest, &duplicate, &Config::default())
-            .expect("expected duplicate source failure");
+        let err = duplicate_source(&manifest, &duplicate, &Config::default())
+            .expect_err("expected duplicate source failure");
         assert_eq!(
-            failure,
+            err,
             SourceFailure::DuplicateDefinition("source.raw.orders".to_string())
         );
     }
@@ -321,7 +437,8 @@ mod tests {
             .child_map
             .insert(source.__common_attr__.unique_id.clone(), vec![]);
         let config = Config::default();
-        assert!(unused_source(&manifest, &source, &config).is_some());
+        let result = unused_source(&manifest, &source, &config);
+        assert!(matches!(result, Err(SourceFailure::UnusedSource)));
     }
 
     #[test]
@@ -330,14 +447,17 @@ mod tests {
         let mut freshness = FreshnessDefinition::default();
         source.freshness = Some(freshness.clone());
         let config = Config::default();
-        assert!(missing_source_freshness(&source, &config).is_some());
+        assert!(matches!(
+            missing_source_freshness(&source, &config),
+            Err(SourceFailure::MissingFreshness)
+        ));
 
         freshness.warn_after = Some(FreshnessRules {
             count: Some(1),
             period: Some(FreshnessPeriod::day),
         });
         source.freshness = Some(freshness.clone());
-        assert!(missing_source_freshness(&source, &config).is_none());
+        assert!(missing_source_freshness(&source, &config).is_ok());
     }
 
     #[test]
@@ -378,7 +498,10 @@ mod tests {
         };
         let source = manifest.sources.get("source.raw.orders").unwrap();
         let config = Config::default();
-        assert!(source_fanout(&manifest, source, &config).is_some());
+        assert!(matches!(
+            source_fanout(&manifest, source, &config),
+            Err(SourceFailure::SourceFanout)
+        ));
     }
 
     #[test]
@@ -396,7 +519,10 @@ mod tests {
             select: vec![Selector::MissingSourceColumnDescriptions],
             ..Default::default()
         };
-        assert!(missing_source_column_descriptions(&source, &config).is_some());
+        assert!(matches!(
+            missing_source_column_descriptions(&mut source, &config),
+            Err(SourceFailure::SourceTableColumnDescriptions)
+        ));
     }
 
     #[test]
@@ -405,7 +531,10 @@ mod tests {
         source.__common_attr__.description = Some("TBD".to_string());
 
         let config = Config::default();
-        assert!(missing_source_table_description(&source, &config).is_some());
+        assert!(matches!(
+            missing_source_table_description(&mut source, &config),
+            Err(SourceFailure::MissingDescription)
+        ));
     }
 
     #[test]
@@ -419,6 +548,6 @@ mod tests {
         source.columns.push(Arc::new(col));
 
         let config = Config::default();
-        assert!(missing_source_column_descriptions(&source, &config).is_none());
+        assert!(missing_source_column_descriptions(&mut source, &config).is_ok());
     }
 }

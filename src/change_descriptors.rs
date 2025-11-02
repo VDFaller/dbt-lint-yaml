@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::writeback::changes::ExecutableChange;
-use crate::writeback::properties::ModelProperty;
+use crate::writeback::properties::{ModelProperty, SourceProperty};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ColumnChange {
@@ -69,6 +69,32 @@ impl ModelChanges {
         }
 
         ops
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SourceChange {
+    ChangePropertiesFile {
+        source_id: String,
+        source_name: String,
+        table_name: String,
+        patch_path: Option<PathBuf>,
+        property: Option<SourceProperty>,
+    },
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct SourceChanges {
+    pub source_id: String,
+    pub source_name: String,
+    pub table_name: String,
+    pub patch_path: Option<PathBuf>,
+    pub changes: Vec<SourceChange>,
+}
+
+impl SourceChanges {
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
     }
 }
 

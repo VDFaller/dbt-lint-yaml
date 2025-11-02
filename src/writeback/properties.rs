@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::BTreeMap;
 
-use dbt_schemas::schemas::{dbt_column::DbtColumnRef, manifest::ManifestModel};
+use dbt_schemas::schemas::{
+    dbt_column::DbtColumnRef,
+    manifest::{ManifestModel, ManifestSource},
+};
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ColumnProperty {
@@ -103,6 +106,65 @@ pub fn model_property_from_manifest_differences(
         return None;
     }
     Some(model_prop)
+}
+
+pub fn source_property_from_manifest_differences(
+    original: &ManifestSource,
+    updated: &ManifestSource,
+) -> Option<SourceProperty> {
+    let mut source_prop = SourceProperty {
+        name: original.source_name.clone(),
+        description: None,
+        tables: Vec::new(),
+        extras: BTreeMap::new(),
+    };
+
+    let mut has_change = false;
+
+    if original.source_description != updated.source_description {
+        has_change = true;
+        source_prop.description = Some(updated.source_description.clone());
+    }
+
+    let mut table_prop = ModelProperty {
+        name: Some(original.__common_attr__.name.clone()),
+        description: None,
+        columns: Vec::new(),
+        extras: BTreeMap::new(),
+    };
+
+    if original.__common_attr__.description != updated.__common_attr__.description {
+        has_change = true;
+        table_prop.description = updated.__common_attr__.description.clone();
+    }
+
+    let mut original_columns_map: BTreeMap<String, &DbtColumnRef> = BTreeMap::new();
+    for col in &original.columns {
+        original_columns_map.insert(col.name.clone(), col);
+    }
+
+    for updated_col in &updated.columns {
+        if let Some(orig_col) = original_columns_map.get(&updated_col.name) {
+            if orig_col.description != updated_col.description {
+                has_change = true;
+                table_prop.columns.push(ColumnProperty {
+                    name: updated_col.name.clone(),
+                    description: updated_col.description.clone(),
+                    extras: BTreeMap::new(),
+                });
+            }
+        }
+    }
+
+    if table_prop.description.is_some() || !table_prop.columns.is_empty() {
+        source_prop.tables.push(table_prop);
+    }
+
+    if !has_change {
+        return None;
+    }
+
+    Some(source_prop)
 }
 
 #[skip_serializing_none]
