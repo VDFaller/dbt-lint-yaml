@@ -5,6 +5,7 @@ use crate::codegen::write_generated_model;
 use crate::{
     config::{Config, Selector},
     osmosis::get_upstream_col_desc,
+    writeback::properties::model_property_from_manifest_differences,
 };
 use dbt_schemas::schemas::{
     dbt_column::DbtColumnRef,
@@ -137,6 +138,8 @@ pub(crate) fn check_model(
             ..Default::default()
         };
     };
+    let mut changed_properties = false;
+    let mut mut_model = model_meta.clone();
 
     let model_unique_id = model_meta.__common_attr__.unique_id.clone();
     let patch_path = model_meta.__common_attr__.patch_path.clone();
@@ -150,7 +153,16 @@ pub(crate) fn check_model(
     }
 
     // all these checks are dependent on the properties file existing
-    if let Some(f) = missing_model_description(model_meta, config) {
+    match missing_model_description(&mut mut_model, config){
+        Ok(Some(_)) => {
+            changed_properties = true;
+        }
+        Ok(None) => {}
+        Err(f) => {
+            failures.push(f);
+        }
+    }
+    if let Err(f) = missing_model_description(&mut mut_model, config) {
         failures.push(f)
     }
     if let Some(f) = missing_model_tags(model_meta, config) {
@@ -200,6 +212,15 @@ pub(crate) fn check_model(
                 .entry(column_name.clone())
                 .or_default()
                 .insert(change.clone());
+        }
+    }
+
+    // finalize model-level changes
+    if changed_properties {
+        if let Some(property) = model_property_from_manifest_differences(model_meta, &mut_model) {
+            model_level_changes.push(ModelChange::ChangePropertiesFile {
+                property: Some(property),
+            });
         }
     }
 
@@ -280,9 +301,9 @@ fn check_model_column(
 /// - None
 /// - An empty string (after trimming)
 /// - Matches any of the configured invalid descriptions (case-insensitive, after trimming)
-fn missing_model_description(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {
+fn missing_model_description(model: &mut ManifestModel, config: &Config) -> Result<Option<ModelChange>, ModelFailure> {
     if !config.is_selected(Selector::MissingModelDescriptions) {
-        return None;
+        return Ok(None);
     }
     let is_missing = match model.__common_attr__.description.as_ref() {
         None => true,
@@ -298,8 +319,21 @@ fn missing_model_description(model: &ManifestModel, config: &Config) -> Option<M
             }
         }
     };
-
-    is_missing.then_some(ModelFailure::DescriptionMissing)
+    if !is_missing {
+        return Ok(None);
+    }
+    else {
+        println!("Is Fixable: {}", config.is_fixable(Selector::MissingModelDescriptions));
+        if config.is_fixable(Selector::MissingModelDescriptions) {
+            // just an example of how we COULD fix it
+            model.__common_attr__.description = Some("Auto-generated description".to_string());
+            Ok(Some(ModelChange::ChangePropertiesFile{
+                property: None,
+            }))
+        } else {
+            Err(ModelFailure::DescriptionMissing)
+        }
+    }
 }
 
 fn missing_model_tags(model: &ManifestModel, config: &Config) -> Option<ModelFailure> {

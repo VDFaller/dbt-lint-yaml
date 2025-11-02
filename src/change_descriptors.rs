@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::writeback::changes::ExecutableChange;
+use crate::writeback::properties::ModelProperty;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ColumnChange {
@@ -28,6 +29,9 @@ pub enum ModelChange {
         model_name: String,
         patch_path: Option<PathBuf>,
         new_path: PathBuf,
+    },
+    ChangePropertiesFile {
+        property: Option<ModelProperty>,
     },
 }
 

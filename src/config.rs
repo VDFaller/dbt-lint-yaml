@@ -24,6 +24,7 @@ use thiserror::Error;
 pub enum Selector {
     #[strum(props(fixable = true))]
     MissingColumnDescriptions,
+    #[strum(props(fixable = true))]
     MissingModelDescriptions,
     #[strum(props(default = false))]
     MissingModelTags,

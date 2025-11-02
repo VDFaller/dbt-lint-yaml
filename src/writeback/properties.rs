@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::BTreeMap;
 
+use dbt_schemas::schemas::{
+    dbt_column::DbtColumnRef,
+    manifest::{DbtManifestV12, DbtNode, ManifestModel},
+};
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ColumnProperty {
@@ -63,6 +67,43 @@ impl ModelProperty {
             self.extras.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
+}
+
+pub fn model_property_from_manifest_differences(original: &ManifestModel, updated: &ManifestModel) -> Option<ModelProperty> {
+    let mut model_prop = ModelProperty {
+        name: Some(original.__common_attr__.name.clone()), // TODO: name shouldn't be option
+        description: None,
+        columns: Vec::new(),
+        extras: BTreeMap::new(),
+    };
+    let mut has_change = false;
+    if original.__common_attr__.description != updated.__common_attr__.description {
+        has_change = true;
+        model_prop.description = updated.__common_attr__.description.clone();
+    }
+
+
+    let mut original_columns_map: BTreeMap<String, &DbtColumnRef> = BTreeMap::new();
+    for col in &original.__base_attr__.columns {
+        original_columns_map.insert(col.name.clone(), col);
+    }
+
+    for updated_col in &updated.__base_attr__.columns {
+        if let Some(orig_col) = original_columns_map.get(&updated_col.name) {
+            if orig_col.description != updated_col.description {
+                model_prop.columns.push(ColumnProperty {
+                    name: updated_col.name.clone(),
+                    description: updated_col.description.clone(),
+                    extras: BTreeMap::new(),
+                });
+            }
+        }
+    }
+    // I don't think this catches everything yet, but it's a start
+    if !has_change {
+        return None;
+    }
+    Some(model_prop)
 }
 
 #[skip_serializing_none]
