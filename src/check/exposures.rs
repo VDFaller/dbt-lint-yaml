@@ -37,13 +37,13 @@ pub fn check_exposures(manifest: &DbtManifestV12, config: &Config) -> Vec<Exposu
     manifest
         .exposures
         .values()
-        .map(|exposure| check_exposure(exposure, manifest, config))
+        .map(|exposure| check_exposure(manifest, exposure, config))
         .collect()
 }
 
 fn check_exposure(
-    exposure: &ManifestExposure,
     manifest: &DbtManifestV12,
+    exposure: &ManifestExposure,
     config: &Config,
 ) -> ExposureResult {
     let mut failures = vec![];

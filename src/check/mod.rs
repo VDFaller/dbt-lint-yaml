@@ -10,7 +10,7 @@ mod sources;
 
 use exposures::check_exposures;
 use models::check_model;
-use sources::check_source;
+use sources::check_sources;
 
 pub use crate::change_descriptors::ColumnChange;
 pub use crate::change_descriptors::{ModelChange, ModelChanges};
@@ -19,20 +19,7 @@ pub use exposures::{ExposureChange, ExposureFailure, ExposureResult};
 pub use models::{ModelFailure, ModelResult};
 pub use sources::{SourceFailure, SourceResult};
 
-#[derive(Debug, Clone)]
-pub enum RuleOutcome<F, C> {
-    Pass,
-    Fail(F),
-    Change(C),
-}
-
-impl<F, C> RuleOutcome<F, C> {
-    pub fn is_pass(&self) -> bool {
-        matches!(self, Self::Pass)
-    }
-}
-
-#[derive(Default, Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct CheckResult {
     pub models: BTreeMap<String, ModelResult>,
     pub sources: BTreeMap<String, SourceResult>,
@@ -99,11 +86,8 @@ where
         result.models.insert(model_key, model_result);
     }
 
-    for source in manifest.sources.values() {
-        let source_result = check_source(manifest, source, config);
-
+    for source_result in check_sources(manifest, config) {
         reporter(CheckEvent::Source(&source_result));
-
         let source_key = source_result.source_id().to_string();
         result.sources.insert(source_key, source_result);
     }
@@ -207,10 +191,7 @@ mod tests {
         let manifest = manifest_with_inheritable_column();
 
         let config = Config {
-            select: vec![
-                Selector::MissingModelDescriptions,
-                Selector::MissingColumnDescriptions,
-            ],
+            select: vec![Selector::MissingColumnDescriptions],
             ..Default::default()
         }
         .with_fix(true);
@@ -218,15 +199,21 @@ mod tests {
 
         assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));
-        let model_result = result
+
+        let downstream_result = result
             .models
             .get("model.test.downstream")
             .expect("model result should be tracked");
-        assert!(model_result.is_failure());
-        assert!(
-            model_result
-                .failures()
-                .contains(&ModelFailure::DescriptionMissing)
-        );
+        assert!(downstream_result.is_pass());
+
+        let downstream_changes = result
+            .model_changes
+            .get("model.test.downstream")
+            .expect("downstream change should be tracked");
+        let column_changes = downstream_changes
+            .column_changes
+            .get("customer_id")
+            .expect("customer_id column should have a change recorded");
+        assert_eq!(column_changes.len(), 1);
     }
 }

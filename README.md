@@ -37,6 +37,8 @@ For now we're piggy-backing on [dbt-sa-cli](https://github.com/dbt-labs/dbt-sa-c
 
 ``` bash
 dbt-lint-yaml parse
+# or if you want auto fixes
+dbt-lint-yaml parse --fix
 ```
 
 The rules are controlled by a `dbt-lint.yml` file in the root of your dbt project. 

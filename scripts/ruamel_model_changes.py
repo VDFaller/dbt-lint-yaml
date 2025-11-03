@@ -57,8 +57,8 @@ def apply_updates(payload: Dict[str, Any]) -> List[str]:
     patch_path = Path(payload["patch_path"])
     model_name = payload["model_name"]
     column_changes = payload.get("column_changes", [])
-
-    if not column_changes:
+    model_description = payload.get("model_description")
+    if not column_changes and model_description is None:
         return []
 
     yaml = YAML()
@@ -77,6 +77,17 @@ def apply_updates(payload: Dict[str, Any]) -> List[str]:
     model["columns"] = columns
 
     updated_columns: List[str] = []
+    model_mutated = False
+
+    if "model_description" in payload:
+        if model_description is None:
+            if "description" in model:
+                model.pop("description", None)
+                model_mutated = True
+        else:
+            if model.get("description") != model_description:
+                model["description"] = model_description
+                model_mutated = True
 
     for change in column_changes:
         column_name = change.get("column_name")
@@ -93,7 +104,7 @@ def apply_updates(payload: Dict[str, Any]) -> List[str]:
             column["description"] = new_description
             updated_columns.append(column_name)
 
-    if updated_columns:
+    if updated_columns or model_mutated:
         with patch_path.open("w", encoding="utf-8") as handle:
             yaml.dump(document, handle)
 

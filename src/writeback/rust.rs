@@ -1,4 +1,5 @@
 use super::WriteBackError;
+use crate::change_descriptors::ModelChange;
 use crate::check::ModelChanges;
 use crate::writeback::changes::ExecutableChange;
 use crate::writeback::properties::PropertyFile;
@@ -35,6 +36,18 @@ pub fn apply_with_rust(
         let mut docs: PropertyFile = dbt_serde_yaml::from_str(&yaml_str)?;
 
         let mut updated_columns = Vec::new();
+        let mut file_mutated = false;
+
+        let mut reported_columns: Vec<String> = Vec::new();
+        for change in &model_changes.changes {
+            if let ModelChange::ChangePropertiesFile {
+                property: Some(prop),
+                ..
+            } = change
+            {
+                reported_columns.extend(prop.columns.iter().map(|col| col.name.clone()));
+            }
+        }
 
         // Ask the ModelChanges to produce executable writeback ops (columns + model-level)
         let ops: Vec<Box<dyn ExecutableChange>> = model_changes.to_writeback_ops();
@@ -43,17 +56,25 @@ pub fn apply_with_rust(
         for op in ops.iter() {
             let mutated = op.apply_with_fs(&mut docs, project_root)?;
             if !mutated.is_empty() {
+                file_mutated = true;
                 updated_columns.extend(mutated);
             }
         }
 
         // Persist YAML if we mutated in-memory docs
-        if !updated_columns.is_empty() {
+        if file_mutated {
             let out_str = dbt_serde_yaml::to_string(&docs)?;
             std::fs::write(&resolved_path, out_str)?;
         }
 
-        if !updated_columns.is_empty() {
+        if file_mutated {
+            // Filter out synthetic markers before reporting.
+            updated_columns.retain(|label| !label.starts_with("@model:"));
+            if updated_columns.is_empty() {
+                updated_columns = reported_columns;
+            } else {
+                updated_columns.extend(reported_columns);
+            }
             results.push((model_changes.model_id.clone(), updated_columns));
         } else if !model_changes.changes.is_empty() {
             results.push((model_changes.model_id.clone(), Vec::new()));
@@ -66,7 +87,7 @@ pub fn apply_with_rust(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::change_descriptors::ColumnChange;
+    use crate::change_descriptors::{ColumnChange, ModelChange};
     use std::fs;
     use tempfile::tempdir;
 
@@ -97,15 +118,23 @@ models:
         };
         mc.column_changes.insert("order_item_id".to_string(), {
             let mut s = std::collections::BTreeSet::new();
-            s.insert(ColumnChange::DescriptionChanged {
-                model_id: "model.jaffle_shop.stg_order_items".to_string(),
-                model_name: "stg_order_items".to_string(),
-                patch_path: Some(Path::new("models.yml").to_path_buf()),
-                column_name: "order_item_id".to_string(),
-                old: Some("The unique key for each order item.".to_string()),
-                new: Some("New desc".to_string()),
-            });
+            s.insert(ColumnChange::ChangePropertiesFile);
             s
+        });
+        mc.changes.push(ModelChange::ChangePropertiesFile {
+            model_id: mc.model_id.clone(),
+            model_name: "stg_order_items".to_string(),
+            patch_path: mc.patch_path.clone(),
+            property: Some(crate::writeback::properties::ModelProperty {
+                name: Some("stg_order_items".to_string()),
+                description: None,
+                columns: vec![crate::writeback::properties::ColumnProperty {
+                    name: "order_item_id".to_string(),
+                    description: Some("New desc".to_string()),
+                    extras: std::collections::BTreeMap::new(),
+                }],
+                extras: std::collections::BTreeMap::new(),
+            }),
         });
         changes.insert(mc.model_id.clone(), mc);
 
@@ -129,30 +158,29 @@ models:
         };
         mc.column_changes.insert("new_col".to_string(), {
             let mut s = std::collections::BTreeSet::new();
-            s.insert(ColumnChange::DescriptionChanged {
-                model_id: "model.jaffle_shop.stg_order_items".to_string(),
-                model_name: "stg_order_items".to_string(),
-                patch_path: Some(Path::new("models.yml").to_path_buf()),
-                column_name: "new_col".to_string(),
-                old: None,
-                new: Some("Appended".to_string()),
-            });
+            s.insert(ColumnChange::ChangePropertiesFile);
             s
+        });
+        mc.changes.push(ModelChange::ChangePropertiesFile {
+            model_id: mc.model_id.clone(),
+            model_name: "stg_order_items".to_string(),
+            patch_path: mc.patch_path.clone(),
+            property: Some(crate::writeback::properties::ModelProperty {
+                name: Some("stg_order_items".to_string()),
+                description: None,
+                columns: vec![crate::writeback::properties::ColumnProperty {
+                    name: "new_col".to_string(),
+                    description: Some("Appended".to_string()),
+                    extras: std::collections::BTreeMap::new(),
+                }],
+                extras: std::collections::BTreeMap::new(),
+            }),
         });
         changes.insert(mc.model_id.clone(), mc);
 
-        let res = apply_with_rust(dir.path(), &changes);
-        assert!(res.is_err(), "expected error when column missing");
-        match res.unwrap_err() {
-            WriteBackError::ColumnMissing {
-                model_id,
-                column_name,
-            } => {
-                // model_id is the model unique id from ModelChanges
-                assert_eq!(model_id, "model.jaffle_shop.stg_order_items");
-                assert_eq!(column_name, "new_col");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let res = apply_with_rust(dir.path(), &changes).unwrap();
+        assert_eq!(res.len(), 1);
+        let written = fs::read_to_string(dir.path().join("models.yml")).unwrap();
+        assert!(written.contains("Appended"));
     }
 }
