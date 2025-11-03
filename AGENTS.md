@@ -9,6 +9,7 @@ I'm still learning Rust, so some of the code here may be a bit clunky.  Any sugg
 
  
 ## Testing instructions
-- along with `cargo fmt` and `cargo test`, run `cargo clippy --all-targets --all-features -- -D warnings`
-- pseudo integration tests can be run with `cargo run -- parse --project-dir tests/jaffle_shop`
- 
+* Unit testing can be done with `cargo fmt && cargo test`
+* Unit testing WITH Integration testing can be done with `cargo fmt && uv run cargo test -- --ignored` (since the integration tests are currently marked as ignored)
+    * integration tests depend on ruamel.yaml being installed in your python environment.
+* Linting can be done with clippy: `cargo clippy --all-targets --all-features -- -D warnings`
