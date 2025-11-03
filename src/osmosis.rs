@@ -1,4 +1,4 @@
-use crate::{change_descriptors::ColumnChange, check::ModelChanges, config::Config};
+use crate::{change_descriptors::ModelChange, check::ModelChanges, config::Config};
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::BTreeMap;
 
@@ -96,23 +96,31 @@ fn lookup_model_change_description(
     upstream_id: &str,
     col_name: &str,
 ) -> Option<String> {
-    model_changes.get(upstream_id).and_then(|change| {
-        change.column_changes.get(col_name).and_then(|changes| {
-            changes
-                .iter()
-                .find_map(|column_change| match column_change {
-                    ColumnChange::DescriptionChanged { new, .. } => new.clone(),
-                })
-        })
-    })
+    let changes = model_changes.get(upstream_id)?;
+
+    for change in &changes.changes {
+        if let ModelChange::ChangePropertiesFile {
+            property: Some(prop),
+            ..
+        } = change
+        {
+            if let Some(column) = prop.columns.iter().find(|col| col.name == col_name) {
+                return column.description.clone();
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::{get_upstream_col_desc, lookup_model_change_description};
     use crate::{
+        change_descriptors::ModelChange,
         check::{ColumnChange, ModelChanges},
         config::Config,
+        writeback::properties::{ColumnProperty, ModelProperty},
     };
     use dbt_schemas::schemas::{
         dbt_column::DbtColumn,
@@ -124,24 +132,10 @@ mod tests {
     // FIXTURES
     fn model_changes_fixture() -> BTreeMap<String, ModelChanges> {
         let mut customers_columns = BTreeSet::new();
-        customers_columns.insert(ColumnChange::DescriptionChanged {
-            model_id: "model.jaffle_shop.customers".to_string(),
-            model_name: "customers".to_string(),
-            patch_path: None,
-            column_name: "customer_id".to_string(),
-            old: Some("Old description".to_string()),
-            new: Some("Fresh description".to_string()),
-        });
+        customers_columns.insert(ColumnChange::ChangePropertiesFile);
 
         let mut orders_columns = BTreeSet::new();
-        orders_columns.insert(ColumnChange::DescriptionChanged {
-            model_id: "model.jaffle_shop.orders".to_string(),
-            model_name: "orders".to_string(),
-            patch_path: None,
-            column_name: "order_id".to_string(),
-            old: None,
-            new: Some("New order description".to_string()),
-        });
+        orders_columns.insert(ColumnChange::ChangePropertiesFile);
 
         let mut map = BTreeMap::new();
         map.insert(
@@ -149,12 +143,26 @@ mod tests {
             ModelChanges {
                 model_id: "model.jaffle_shop.customers".to_string(),
                 patch_path: None,
-                changes: Vec::new(),
                 column_changes: {
                     let mut column_changes = BTreeMap::new();
                     column_changes.insert("customer_id".to_string(), customers_columns);
                     column_changes
                 },
+                changes: vec![ModelChange::ChangePropertiesFile {
+                    model_id: "model.jaffle_shop.customers".to_string(),
+                    model_name: "customers".to_string(),
+                    patch_path: None,
+                    property: Some(ModelProperty {
+                        name: Some("customers".to_string()),
+                        description: None,
+                        columns: vec![ColumnProperty {
+                            name: "customer_id".to_string(),
+                            description: Some("Fresh description".to_string()),
+                            extras: BTreeMap::new(),
+                        }],
+                        extras: BTreeMap::new(),
+                    }),
+                }],
             },
         );
 
@@ -163,12 +171,26 @@ mod tests {
             ModelChanges {
                 model_id: "model.jaffle_shop.orders".to_string(),
                 patch_path: None,
-                changes: Vec::new(),
                 column_changes: {
                     let mut column_changes = BTreeMap::new();
                     column_changes.insert("order_id".to_string(), orders_columns);
                     column_changes
                 },
+                changes: vec![ModelChange::ChangePropertiesFile {
+                    model_id: "model.jaffle_shop.orders".to_string(),
+                    model_name: "orders".to_string(),
+                    patch_path: None,
+                    property: Some(ModelProperty {
+                        name: Some("orders".to_string()),
+                        description: None,
+                        columns: vec![ColumnProperty {
+                            name: "order_id".to_string(),
+                            description: Some("New order description".to_string()),
+                            extras: BTreeMap::new(),
+                        }],
+                        extras: BTreeMap::new(),
+                    }),
+                }],
             },
         );
 

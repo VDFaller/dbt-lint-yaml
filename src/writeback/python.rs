@@ -1,5 +1,5 @@
 use super::WriteBackError;
-use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
+use crate::change_descriptors::{ModelChange, ModelChanges};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -9,17 +9,17 @@ use std::{
 };
 
 #[derive(Debug, Serialize)]
-struct PythonColumnChange<'a> {
-    column_name: &'a str,
+struct PythonColumnChange {
+    column_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    new_description: Option<&'a str>,
+    new_description: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct PythonRequest<'a> {
     patch_path: &'a Path,
     model_name: &'a str,
-    column_changes: Vec<PythonColumnChange<'a>>,
+    column_changes: Vec<PythonColumnChange>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model_description: Option<&'a str>,
 }
@@ -57,6 +57,7 @@ pub fn apply_with_python(
         };
 
         let mut model_description_change: Option<String> = None;
+        let mut property_payload: Option<&crate::writeback::properties::ModelProperty> = None;
 
         for change in &model_changes.changes {
             match change {
@@ -93,6 +94,9 @@ pub fn apply_with_python(
                     {
                         model_description_change = Some(desc.clone());
                     }
+                    if let Some(prop) = property {
+                        property_payload = Some(prop);
+                    }
                 }
                 other => {
                     return Err(WriteBackError::UnsupportedModelChange {
@@ -105,17 +109,22 @@ pub fn apply_with_python(
 
         let model_name = extract_model_name(&model_changes.model_id);
 
-        let mut column_changes = Vec::new();
-        for (column_name, change_set) in &model_changes.column_changes {
-            for change in change_set {
-                match change {
-                    ColumnChange::DescriptionChanged { new, .. } => {
-                        column_changes.push(PythonColumnChange {
-                            column_name: column_name.as_str(),
-                            new_description: new.as_deref(),
-                        });
-                    }
-                }
+        let mut column_changes: Vec<PythonColumnChange> = Vec::new();
+        if let Some(prop) = property_payload {
+            for column in &prop.columns {
+                column_changes.push(PythonColumnChange {
+                    column_name: column.name.clone(),
+                    new_description: column.description.clone(),
+                });
+            }
+        } else if model_changes.column_changes.is_empty() {
+            // No property payload, but also no explicit column list; fall back to empty set.
+        } else {
+            for column_name in model_changes.column_changes.keys() {
+                column_changes.push(PythonColumnChange {
+                    column_name: column_name.clone(),
+                    new_description: None,
+                });
             }
         }
 

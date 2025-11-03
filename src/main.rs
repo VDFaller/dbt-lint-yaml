@@ -225,12 +225,8 @@ async fn main() -> FsResult<()> {
         for (column, column_changes) in model_changes.column_changes.iter() {
             for change in column_changes {
                 match change {
-                    ColumnChange::DescriptionChanged { new, .. } => {
-                        println!(
-                            "  Column: {} - New Description: {}",
-                            column,
-                            new.as_deref().unwrap_or("None"),
-                        );
+                    ColumnChange::ChangePropertiesFile => {
+                        println!("  Column: {column} - properties file will be regenerated");
                     }
                 }
             }

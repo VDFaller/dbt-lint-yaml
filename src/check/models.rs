@@ -1,19 +1,15 @@
-use super::columns::{self, ColumnFailure, ColumnResult};
+use super::columns::ColumnResult;
 use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
 use crate::codegen::write_generated_model;
 use crate::{
     config::{Config, Selector},
-    osmosis::get_upstream_col_desc,
     writeback::properties::model_property_from_manifest_differences,
 };
-use dbt_schemas::schemas::{
-    dbt_column::DbtColumnRef,
-    manifest::{DbtManifestV12, DbtNode, ManifestModel},
-};
+use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::PathBuf;
-use std::sync::Arc;
+
 use strum::AsRefStr;
 
 #[derive(Debug, Clone, AsRefStr, PartialEq, Eq)]
@@ -214,7 +210,7 @@ pub(crate) fn check_model(
         Err(failure) => failures.push(failure),
     }
 
-    let column_results = check_model_columns(
+    let column_results = crate::check::columns::check_model_columns(
         manifest,
         original_model,
         &mut working_model,
@@ -281,84 +277,7 @@ pub(crate) fn check_model(
     }
 }
 
-fn check_model_column(
-    manifest: &DbtManifestV12,
-    model: &ManifestModel,
-    original_column: &DbtColumnRef,
-    working_column: &mut DbtColumnRef,
-    prior_changes: &BTreeMap<String, ModelChanges>,
-    config: &Config,
-) -> ColumnResult {
-    let mut failures: Vec<ColumnFailure> = Vec::new();
-    let mut changes: Vec<ColumnChange> = Vec::new();
-    match missing_column_description(
-        manifest,
-        model,
-        original_column,
-        working_column,
-        prior_changes,
-        config,
-    ) {
-        Ok(Some(change)) => changes.push(change),
-        Ok(None) => {}
-        Err(failure) => failures.push(failure),
-    }
-
-    ColumnResult {
-        column_name: original_column.name.clone(),
-        failures,
-        changes,
-    }
-}
-
-fn missing_column_description(
-    manifest: &DbtManifestV12,
-    model: &ManifestModel,
-    original_column: &DbtColumnRef,
-    working_column: &mut DbtColumnRef,
-    prior_changes: &BTreeMap<String, ModelChanges>,
-    config: &Config,
-) -> Result<Option<ColumnChange>, ColumnFailure> {
-    // If the selector is not enabled, or the column already has a description,
-    // skip attempting to source a description from upstream.
-    if !config.is_selected(Selector::MissingColumnDescriptions)
-        || columns::missing_description(original_column, config).is_none()
-    {
-        return Ok(None);
-    }
-
-    if !config.is_fixable(Selector::MissingColumnDescriptions) {
-        return Err(ColumnFailure::DescriptionMissing);
-    }
-    if let Some(new_description_text) = get_upstream_col_desc(
-        manifest,
-        Some(prior_changes),
-        &model.__common_attr__.unique_id,
-        original_column.name.as_str(),
-        config,
-    ) {
-        let old_description = original_column.description.clone();
-        let new_description = Some(new_description_text);
-
-        let model_id = model.__common_attr__.unique_id.clone();
-        let model_name = model_id.rsplit('.').next().unwrap_or(&model_id).to_string();
-        let patch_path = model.__common_attr__.patch_path.clone();
-
-        let column_mut = Arc::make_mut(working_column);
-        column_mut.description = new_description.clone();
-
-        return Ok(Some(ColumnChange::DescriptionChanged {
-            model_id,
-            model_name,
-            patch_path,
-            column_name: original_column.name.clone(),
-            old: old_description,
-            new: new_description.clone(),
-        }));
-    } else {
-        Err(ColumnFailure::DescriptionMissing)
-    }
-}
+// Column checking (moved to `src/check/columns.rs`)
 
 /// Check if a model is missing a description.
 /// A description is considered missing if it is:
@@ -680,34 +599,7 @@ fn missing_required_tests(
     }
 }
 
-fn check_model_columns(
-    manifest: &DbtManifestV12,
-    original_model: &ManifestModel,
-    working_model: &mut ManifestModel,
-    prior_changes: &BTreeMap<String, ModelChanges>,
-    config: &Config,
-) -> BTreeMap<String, ColumnResult> {
-    let mut results: BTreeMap<String, ColumnResult> = BTreeMap::new();
-
-    for (original_column, working_column) in original_model
-        .__base_attr__
-        .columns
-        .iter()
-        .zip(working_model.__base_attr__.columns.iter_mut())
-    {
-        let result = check_model_column(
-            manifest,
-            original_model,
-            original_column,
-            working_column,
-            prior_changes,
-            config,
-        );
-        results.insert(original_column.as_ref().name.clone(), result);
-    }
-
-    results
-}
+// Column checking moved into `src/check/columns.rs`.
 
 // helper functions
 fn is_public_model(model: &ManifestModel) -> bool {
@@ -840,11 +732,7 @@ mod tests {
             .get("customer_id")
             .expect("customer_id column should be present");
         let change = column_set.iter().next().expect("change entry should exist");
-        match change {
-            ColumnChange::DescriptionChanged { new, .. } => {
-                assert_eq!(new.as_deref(), Some("Upstream description"));
-            }
-        }
+        assert!(matches!(change, ColumnChange::ChangePropertiesFile));
 
         let mut saw_property_change = false;
         for change in changes.changes.iter() {
@@ -854,6 +742,15 @@ mod tests {
                 assert_eq!(
                     prop.description.as_deref(),
                     Some("Auto-generated description")
+                );
+                let customer_column = prop
+                    .columns
+                    .iter()
+                    .find(|col| col.name == "customer_id")
+                    .expect("column payload should include customer_id");
+                assert_eq!(
+                    customer_column.description.as_deref(),
+                    Some("Upstream description")
                 );
             }
         }
@@ -868,11 +765,7 @@ mod tests {
             .changes()
             .first()
             .expect("expected change entry for column");
-        match change {
-            ColumnChange::DescriptionChanged { new, .. } => {
-                assert_eq!(new.as_deref(), Some("Upstream description"));
-            }
-        }
+        assert!(matches!(change, ColumnChange::ChangePropertiesFile));
     }
 
     #[test]

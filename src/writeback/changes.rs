@@ -1,6 +1,6 @@
 use super::WriteBackError;
-use super::properties::{ModelProperty, PropertyFile};
-use crate::change_descriptors::{ColumnChange, ModelChange};
+use super::properties::PropertyFile;
+use crate::change_descriptors::ModelChange;
 use std::path::Path;
 
 /// A trait implemented by changes that can be executed by the writeback layer.
@@ -16,68 +16,6 @@ pub trait ExecutableChange {
         root: &mut PropertyFile,
         project_root: &Path,
     ) -> Result<Vec<String>, WriteBackError>;
-}
-
-// Column-level change types (centralized here so writeback ops and model-level
-// changes live in the same module).
-// ColumnChange and ModelChange descriptor types live in `crate::change_descriptors`.
-// Implement the in-memory mutation helper here so writeback can operate on the
-// shared descriptor types without moving the full implementations.
-impl ColumnChange {
-    /// Apply this change directly against a `ModelDoc` (in-memory).
-    pub fn apply_to_model_doc(
-        &self,
-        model: &mut ModelProperty,
-        model_id: &str,
-    ) -> Result<bool, crate::writeback::WriteBackError> {
-        match self {
-            ColumnChange::DescriptionChanged {
-                column_name, new, ..
-            } => {
-                if let Some(col) = model.columns.iter_mut().find(|c| c.name == *column_name) {
-                    col.description = new.clone();
-                    Ok(true)
-                } else {
-                    Err(crate::writeback::WriteBackError::ColumnMissing {
-                        model_id: model_id.to_string(),
-                        column_name: column_name.clone(),
-                    })
-                }
-            }
-        }
-    }
-}
-
-// ColumnChange implements ExecutableChange directly.
-impl ExecutableChange for ColumnChange {
-    fn apply_with_fs(
-        &self,
-        root: &mut PropertyFile,
-        _project_root: &Path,
-    ) -> Result<Vec<String>, WriteBackError> {
-        match self {
-            ColumnChange::DescriptionChanged {
-                model_id,
-                model_name,
-                column_name,
-                ..
-            } => {
-                if let Some(model) = root.find_model_mut(model_name) {
-                    let mutated = self.apply_to_model_doc(model, model_id)?;
-                    Ok(if mutated {
-                        vec![column_name.clone()]
-                    } else {
-                        Vec::new()
-                    })
-                } else {
-                    // If the model itself is not found in the docs, this is an error.
-                    Err(crate::writeback::WriteBackError::ModelMissing {
-                        model_id: model_id.to_string(),
-                    })
-                }
-            }
-        }
-    }
 }
 
 impl ExecutableChange for ModelChange {
@@ -168,12 +106,11 @@ impl ExecutableChange for ModelChange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::change_descriptors::ColumnChange;
     use crate::writeback::properties::{ColumnProperty, ModelProperty, PropertyFile};
     use std::collections::BTreeMap;
 
     #[test]
-    fn column_change_updates_existing_column() {
+    fn change_properties_file_merges_column_updates() {
         let mut root = PropertyFile {
             models: Some(Vec::new()),
             sources: None,
@@ -190,20 +127,27 @@ mod tests {
             extras: BTreeMap::new(),
         });
 
-        let change = ColumnChange::DescriptionChanged {
+        let change = ModelChange::ChangePropertiesFile {
             model_id: "model.test.test_model".to_string(),
             model_name: "test_model".to_string(),
             patch_path: None,
-            column_name: "col_a".to_string(),
-            old: Some("old".to_string()),
-            new: Some("new".to_string()),
+            property: Some(ModelProperty {
+                name: Some("test_model".to_string()),
+                description: None,
+                columns: vec![ColumnProperty {
+                    name: "col_a".to_string(),
+                    description: Some("new".to_string()),
+                    extras: BTreeMap::new(),
+                }],
+                extras: BTreeMap::new(),
+            }),
         };
 
         let updated = change
             .apply_with_fs(&mut root, std::path::Path::new("/"))
             .expect("apply should succeed");
 
-        assert_eq!(updated, vec!["col_a".to_string()]);
+        assert_eq!(updated, vec!["@model:test_model".to_string()]);
         let m = root.find_model_mut("test_model").expect("model exists");
         assert_eq!(
             m.columns
@@ -214,44 +158,6 @@ mod tests {
                 .as_deref(),
             Some("new")
         );
-    }
-
-    #[test]
-    fn column_change_appends_missing_column() {
-        let mut root = PropertyFile {
-            models: Some(Vec::new()),
-            sources: None,
-            extras: BTreeMap::new(),
-        };
-        root.models.as_mut().unwrap().push(ModelProperty {
-            name: Some("test_model".to_string()),
-            description: None,
-            columns: vec![],
-            extras: BTreeMap::new(),
-        });
-
-        let change = ColumnChange::DescriptionChanged {
-            model_id: "model.test.test_model".to_string(),
-            model_name: "test_model".to_string(),
-            patch_path: None,
-            column_name: "new_col".to_string(),
-            old: None,
-            new: Some("added".to_string()),
-        };
-
-        let res = change.apply_with_fs(&mut root, std::path::Path::new("/"));
-        assert!(res.is_err(), "expected error when column missing");
-        match res.unwrap_err() {
-            crate::writeback::WriteBackError::ColumnMissing {
-                model_id,
-                column_name,
-            } => {
-                // the model_id supplied in the change is the unique id
-                assert_eq!(model_id, "model.test.test_model");
-                assert_eq!(column_name, "new_col");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
     }
 
     #[test]
