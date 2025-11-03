@@ -74,7 +74,15 @@ impl Display for SourceResult {
     }
 }
 
-pub(crate) fn check_source(
+pub fn check_sources(manifest: &DbtManifestV12, config: &Config) -> Vec<SourceResult> {
+    manifest
+        .sources
+        .values()
+        .map(|source| check_source(manifest, source, config))
+        .collect()
+}
+
+fn check_source(
     manifest: &DbtManifestV12,
     source: &ManifestSource,
     config: &Config,

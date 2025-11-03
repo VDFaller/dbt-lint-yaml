@@ -10,7 +10,7 @@ mod sources;
 
 use exposures::check_exposures;
 use models::check_model;
-use sources::check_source;
+use sources::check_sources;
 
 pub use crate::change_descriptors::ColumnChange;
 pub use crate::change_descriptors::{ModelChange, ModelChanges};
@@ -86,11 +86,8 @@ where
         result.models.insert(model_key, model_result);
     }
 
-    for source in manifest.sources.values() {
-        let source_result = check_source(manifest, source, config);
-
+    for source_result in check_sources(manifest, config) {
         reporter(CheckEvent::Source(&source_result));
-
         let source_key = source_result.source_id().to_string();
         result.sources.insert(source_key, source_result);
     }
