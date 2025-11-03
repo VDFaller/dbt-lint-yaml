@@ -91,15 +91,15 @@ pub fn model_property_from_manifest_differences(
     }
 
     for updated_col in &updated.__base_attr__.columns {
-        if let Some(orig_col) = original_columns_map.get(&updated_col.name) {
-            if orig_col.description != updated_col.description {
-                has_change = true;
-                model_prop.columns.push(ColumnProperty {
-                    name: updated_col.name.clone(),
-                    description: updated_col.description.clone(),
-                    extras: BTreeMap::new(),
-                });
-            }
+        if let Some(orig_col) = original_columns_map.get(&updated_col.name)
+            && orig_col.description != updated_col.description
+        {
+            has_change = true;
+            model_prop.columns.push(ColumnProperty {
+                name: updated_col.name.clone(),
+                description: updated_col.description.clone(),
+                extras: BTreeMap::new(),
+            });
         }
     }
     // I don't think this catches everything yet, but it's a start
@@ -145,15 +145,15 @@ pub fn source_property_from_manifest_differences(
     }
 
     for updated_col in &updated.columns {
-        if let Some(orig_col) = original_columns_map.get(&updated_col.name) {
-            if orig_col.description != updated_col.description {
-                has_change = true;
-                table_prop.columns.push(ColumnProperty {
-                    name: updated_col.name.clone(),
-                    description: updated_col.description.clone(),
-                    extras: BTreeMap::new(),
-                });
-            }
+        if let Some(orig_col) = original_columns_map.get(&updated_col.name)
+            && orig_col.description != updated_col.description
+        {
+            has_change = true;
+            table_prop.columns.push(ColumnProperty {
+                name: updated_col.name.clone(),
+                description: updated_col.description.clone(),
+                extras: BTreeMap::new(),
+            });
         }
     }
 

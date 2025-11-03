@@ -142,40 +142,41 @@ fn check_source(
         })
     };
 
-    if config.fix && property_change_required {
-        if let Some(property) = source_property_from_manifest_differences(source, &working_source) {
-            let mut applied = false;
-            if let Some(changes_ref) = changes.as_mut() {
-                for change in &mut changes_ref.changes {
-                    match change {
-                        SourceChange::ChangePropertiesFile { property: slot, .. } => {
-                            *slot = Some(property.clone());
-                            applied = true;
-                        }
+    if config.fix
+        && property_change_required
+        && let Some(property) = source_property_from_manifest_differences(source, &working_source)
+    {
+        let mut applied = false;
+        if let Some(changes_ref) = changes.as_mut() {
+            for change in &mut changes_ref.changes {
+                match change {
+                    SourceChange::ChangePropertiesFile { property: slot, .. } => {
+                        *slot = Some(property.clone());
+                        applied = true;
                     }
                 }
             }
+        }
 
-            if !applied {
-                let change = SourceChange::ChangePropertiesFile {
+        if !applied {
+            let change = SourceChange::ChangePropertiesFile {
+                source_id: source_id.clone(),
+                source_name: source_name.clone(),
+                table_name: table_name.clone(),
+                patch_path: patch_path.clone(),
+                property: Some(property),
+            };
+
+            if let Some(changes_ref) = changes.as_mut() {
+                changes_ref.changes.push(change);
+            } else {
+                changes = Some(SourceChanges {
                     source_id: source_id.clone(),
                     source_name: source_name.clone(),
                     table_name: table_name.clone(),
                     patch_path: patch_path.clone(),
-                    property: Some(property),
-                };
-
-                if let Some(changes_ref) = changes.as_mut() {
-                    changes_ref.changes.push(change);
-                } else {
-                    changes = Some(SourceChanges {
-                        source_id: source_id.clone(),
-                        source_name: source_name.clone(),
-                        table_name: table_name.clone(),
-                        patch_path: patch_path.clone(),
-                        changes: vec![change],
-                    });
-                }
+                    changes: vec![change],
+                });
             }
         }
     }
@@ -245,7 +246,7 @@ fn missing_source_column_descriptions(
     let has_missing = source
         .columns
         .iter()
-        .any(|col| missing_description(col, config).is_some());
+        .any(|col| missing_description(col, config).is_err());
 
     if has_missing {
         Err(SourceFailure::SourceTableColumnDescriptions)

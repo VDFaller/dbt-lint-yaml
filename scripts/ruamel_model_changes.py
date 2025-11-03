@@ -57,7 +57,7 @@ def apply_updates(payload: Dict[str, Any]) -> List[str]:
     patch_path = Path(payload["patch_path"])
     model_name = payload["model_name"]
     column_changes = payload.get("column_changes", [])
-    model_description = payload.get("model_description") if "model_description" in payload else None
+    model_description = payload.get("model_description")
     if not column_changes and model_description is None:
         return []
 

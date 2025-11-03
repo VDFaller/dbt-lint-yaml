@@ -103,10 +103,9 @@ fn lookup_model_change_description(
             property: Some(prop),
             ..
         } = change
+            && let Some(column) = prop.columns.iter().find(|col| col.name == col_name)
         {
-            if let Some(column) = prop.columns.iter().find(|col| col.name == col_name) {
-                return column.description.clone();
-            }
+            return column.description.clone();
         }
     }
 

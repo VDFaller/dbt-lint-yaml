@@ -77,7 +77,7 @@ fn get_columns_from_parquet(
 pub fn write_generated_model(
     model: &ManifestModel,
     project_root: Option<&Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let models_root = generate_model(model, project_root)?;
     let yaml_str = dbt_serde_yaml::to_string(&models_root)?;
     let write_path = get_write_path(model);
@@ -94,5 +94,5 @@ pub fn write_generated_model(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(resolved, yaml_str)?;
-    Ok(())
+    Ok(get_write_path(model))
 }

@@ -23,6 +23,15 @@ pub enum ModelChange {
         patch_path: Option<PathBuf>,
         new_path: PathBuf,
     },
+    /// A descriptor indicating a properties file was generated for a model.
+    /// The file is expected to already exist on disk when this change is
+    /// produced (the check wrote it); the writeback layer doesn't need to
+    /// perform additional filesystem work for this change.
+    GeneratePropertiesFile {
+        model_id: String,
+        model_name: String,
+        patch_path: Option<PathBuf>,
+    },
     ChangePropertiesFile {
         model_id: String,
         model_name: String,

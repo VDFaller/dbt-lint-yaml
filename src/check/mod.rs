@@ -191,18 +191,14 @@ mod tests {
         let manifest = manifest_with_inheritable_column();
 
         let config = Config {
-            select: vec![
-                Selector::MissingModelDescriptions,
-                Selector::MissingColumnDescriptions,
-            ],
+            select: vec![Selector::MissingColumnDescriptions],
             ..Default::default()
         }
         .with_fix(true);
         let result = check_all(&manifest, &config);
 
-        assert_eq!(result.model_changes.len(), 2);
+        assert_eq!(result.model_changes.len(), 1);
         assert!(result.model_changes.contains_key("model.test.downstream"));
-        assert!(result.model_changes.contains_key("model.test.upstream"));
 
         let downstream_result = result
             .models

@@ -118,7 +118,7 @@ pub fn apply_with_python(
                 });
             }
         } else if model_changes.column_changes.is_empty() {
-            // No property payload, but also no explicit column list; fall back to empty set.
+            // No property payload and no explicit column-level changes to apply; this branch is a no-op.
         } else {
             for column_name in model_changes.column_changes.keys() {
                 column_changes.push(PythonColumnChange {

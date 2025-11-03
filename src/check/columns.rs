@@ -76,24 +76,19 @@ impl std::fmt::Display for ColumnFailure {
 /// - None
 /// - An empty string (after trimming)
 /// - Matches any of the configured invalid descriptions (case-insensitive, after trimming)
-pub fn missing_description(column: &DbtColumnRef, config: &Config) -> Option<ColumnFailure> {
-    let is_missing = match column.description.as_ref() {
-        None => true,
-        Some(s) => {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
-                true
-            } else {
-                // case-insensitive comparison against configured invalid descriptions
-                config
+pub fn missing_description(column: &DbtColumnRef, config: &Config) -> Result<(), ColumnFailure> {
+    match column.description.as_ref().map(|s| s.trim()) {
+        Some(desc)
+            if !desc.is_empty()
+                && !config
                     .invalid_descriptions
                     .iter()
-                    .any(|bad| bad.eq_ignore_ascii_case(trimmed))
-            }
+                    .any(|bad| bad.eq_ignore_ascii_case(desc)) =>
+        {
+            Ok(())
         }
-    };
-
-    is_missing.then_some(ColumnFailure::DescriptionMissing)
+        _ => Err(ColumnFailure::DescriptionMissing),
+    }
 }
 
 /// Top-level entrypoint for checking all columns on a model.
@@ -173,7 +168,7 @@ fn missing_column_description(
     // If the selector is not enabled, or the column already has a description,
     // skip attempting to source a description from upstream.
     if !config.is_selected(Selector::MissingColumnDescriptions)
-        || missing_description(original_column, config).is_none()
+        || missing_description(original_column, config).is_ok()
     {
         return Ok(None);
     }
@@ -213,7 +208,7 @@ mod tests {
         });
 
         let config = Config::default();
-        assert!(missing_description(&col_tbd, &config).is_some());
+        assert!(missing_description(&col_tbd, &config).is_err());
 
         let col_fill = Arc::new(DbtColumn {
             name: "id".to_string(),
@@ -221,13 +216,13 @@ mod tests {
             ..Default::default()
         });
         // default invalid_descriptions contains "FILL ME OUT", trimmed and case-insensitive
-        assert!(missing_description(&col_fill, &config).is_some());
+        assert!(missing_description(&col_fill, &config).is_err());
 
         let col_ok = Arc::new(DbtColumn {
             name: "id".to_string(),
             description: Some("A proper description".to_string()),
             ..Default::default()
         });
-        assert!(missing_description(&col_ok, &config).is_none());
+        assert!(missing_description(&col_ok, &config).is_ok());
     }
 }

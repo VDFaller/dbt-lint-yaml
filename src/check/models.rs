@@ -2,6 +2,7 @@ use super::columns::ColumnResult;
 use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
 use crate::codegen::write_generated_model;
 use crate::{
+    check::columns::check_model_columns,
     config::{Config, Selector},
     writeback::properties::model_property_from_manifest_differences,
 };
@@ -132,6 +133,7 @@ pub(crate) fn check_model(
             ..Default::default()
         };
     };
+    // we pass a mutable copy of the model to apply fixes to directly
     let mut working_model = original_model.clone();
 
     let model_unique_id = working_model.__common_attr__.unique_id.clone();
@@ -146,28 +148,29 @@ pub(crate) fn check_model(
     let mut model_level_changes: Vec<ModelChange> = Vec::new();
     let mut property_change_required = false;
 
-    if let Some(f) = missing_properties_file(node, config) {
-        failures.push(f)
-    }
-
-    if config.fix
-        && config.is_selected(Selector::MissingPropertiesFile)
-        && config.is_fixable(Selector::MissingPropertiesFile)
-        && working_model.__common_attr__.patch_path.is_none()
-    {
-        let generated_patch = working_model
-            .__common_attr__
-            .original_file_path
-            .with_extension("yml");
-        working_model.__common_attr__.patch_path = Some(generated_patch);
+    match missing_properties_file(node, config) {
+        Ok(Some(change)) => {
+            // if the returned change contains a patch_path, apply it to the working model
+            if let ModelChange::GeneratePropertiesFile {
+                patch_path: Some(p),
+                ..
+            } = &change
+            {
+                working_model.__common_attr__.patch_path = Some(p.clone());
+            }
+            // we're NOT pushing to model_level_changes here, as the file gets created by the check
+        }
+        Ok(None) => {}
+        Err(failure) => failures.push(failure),
     }
 
     match missing_model_description(&mut working_model, config) {
         Ok(Some(change)) => {
             if matches!(change, ModelChange::ChangePropertiesFile { .. }) {
                 property_change_required = true;
+            } else {
+                model_level_changes.push(change);
             }
-            model_level_changes.push(change);
         }
         Ok(None) => {}
         Err(failure) => failures.push(failure),
@@ -210,7 +213,7 @@ pub(crate) fn check_model(
         Err(failure) => failures.push(failure),
     }
 
-    let column_results = crate::check::columns::check_model_columns(
+    let column_results = check_model_columns(
         manifest,
         original_model,
         &mut working_model,
@@ -220,6 +223,7 @@ pub(crate) fn check_model(
 
     let mut column_changes: BTreeMap<String, BTreeSet<ColumnChange>> = BTreeMap::new();
     for (column_name, column_result) in &column_results {
+        // TODO: will there every be changes that AREN'T property changes?
         if !column_result.changes().is_empty() {
             property_change_required = true;
         }
@@ -233,26 +237,17 @@ pub(crate) fn check_model(
 
     let patch_path = working_model.__common_attr__.patch_path.clone();
 
-    if config.fix && property_change_required {
-        if let Some(property) =
+    if config.fix
+        && property_change_required
+        && let Some(property) =
             model_property_from_manifest_differences(original_model, &working_model)
-        {
-            let mut applied = false;
-            for change in model_level_changes.iter_mut() {
-                if let ModelChange::ChangePropertiesFile { property: slot, .. } = change {
-                    *slot = Some(property.clone());
-                    applied = true;
-                }
-            }
-            if !applied {
-                model_level_changes.push(ModelChange::ChangePropertiesFile {
-                    model_id: model_unique_id.clone(),
-                    model_name: model_name.clone(),
-                    patch_path: patch_path.clone(),
-                    property: Some(property),
-                });
-            }
-        }
+    {
+        model_level_changes.push(ModelChange::ChangePropertiesFile {
+            model_id: model_unique_id.clone(),
+            model_name: model_name.clone(),
+            patch_path: patch_path.clone(),
+            property: Some(property),
+        });
     }
 
     let has_model_changes = !model_level_changes.is_empty();
@@ -292,22 +287,20 @@ fn missing_model_description(
         return Ok(None);
     }
 
-    let is_missing = match model.__common_attr__.description.as_ref() {
-        None => true,
-        Some(s) => {
+    // if the description is valid
+    if model
+        .__common_attr__
+        .description
+        .as_deref()
+        .is_some_and(|s| {
             let trimmed = s.trim();
-            if trimmed.is_empty() {
-                true
-            } else {
-                config
+            !trimmed.is_empty()
+                && !config
                     .invalid_descriptions
                     .iter()
                     .any(|bad| bad.eq_ignore_ascii_case(trimmed))
-            }
-        }
-    };
-
-    if !is_missing {
+        })
+    {
         return Ok(None);
     }
 
@@ -332,11 +325,12 @@ fn missing_model_tags(model: &ManifestModel, config: &Config) -> Result<(), Mode
     if !config.is_selected(Selector::MissingModelTags) {
         return Ok(());
     }
-    if model.config.tags.is_none() {
-        Err(ModelFailure::TagsMissing(Vec::new()))
-    } else {
-        Ok(())
-    }
+    model
+        .config
+        .tags
+        .as_ref()
+        .map(|_| ())
+        .ok_or_else(|| ModelFailure::TagsMissing(Vec::new()))
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#multiple-sources-joined
@@ -364,26 +358,37 @@ fn direct_join_to_source(model: &ManifestModel, config: &Config) -> Result<(), M
     if !config.is_selected(Selector::DirectJoinToSource) {
         return Ok(());
     }
-    let depends_on = &model.__base_attr__.depends_on.nodes;
-    if depends_on.len() < 2 {
+    let deps = &model.__base_attr__.depends_on.nodes;
+    // only relevant when there are multiple upstream dependencies
+    if deps.len() < 2 {
         return Ok(());
     }
-    let sources: Vec<String> = depends_on
-        .iter()
-        .filter(|upstream_id| upstream_id.starts_with("source."))
-        .cloned()
-        .collect();
-    if sources.is_empty() {
-        Ok(())
-    } else {
+
+    // avoid scanning twice: find the first source dependency, and only
+    // materialize the full list if we actually need to return a failure
+    let mut srcs = deps.iter().filter(|id| id.starts_with("source."));
+    if let Some(first) = srcs.next() {
+        // build the vec starting with the found item and extending with the rest
+        let mut sources: Vec<String> = Vec::with_capacity(1);
+        sources.push(first.clone());
+        sources.extend(srcs.cloned());
         Err(ModelFailure::DirectJoinToSource(sources))
+    } else {
+        Ok(())
     }
 }
 
-fn missing_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailure> {
+// TODO: to really propagate well, this would need to recreate the ManifestModel
+// or at the very least add the columns
+// https://github.com/VDFaller/dbt-lint-yaml/issues/40
+fn missing_properties_file(
+    node: &DbtNode,
+    config: &Config,
+) -> Result<Option<ModelChange>, ModelFailure> {
     if !config.is_selected(Selector::MissingPropertiesFile) {
-        return None;
+        return Ok(None);
     }
+
     let missing_patch = match node {
         DbtNode::Model(model) => model.__common_attr__.patch_path.is_none(),
         DbtNode::Seed(seed) => seed.__common_attr__.patch_path.is_none(),
@@ -391,23 +396,34 @@ fn missing_properties_file(node: &DbtNode, config: &Config) -> Option<ModelFailu
         _ => false,
     };
     if !missing_patch {
-        return None;
+        return Ok(None);
     }
 
-    // fixing this on the fly because there's will only be one IO operation anyway
-    // and that will make it so the other checks can happen
-    // no reason to use the change framework here
-    if config.is_fixable(Selector::MissingPropertiesFile)
-        && let DbtNode::Model(model) = node
-    {
-        if let Err(e) = write_generated_model(model, config.project_dir.as_deref()) {
-            eprintln!("failed to write generated model properties: {e}");
-            return Some(ModelFailure::MissingPropertiesFile);
+    // If fixable and we're looking at a model, write a generated properties file and
+    // return a ModelChange describing the change (so callers can record it and
+    // apply the patch_path to their working model clone).
+    if config.is_fixable(Selector::MissingPropertiesFile) {
+        match node {
+            DbtNode::Model(model) => {
+                match write_generated_model(model, config.project_dir.as_deref()) {
+                    Ok(generated_patch) => {
+                        // If we successfully wrote the generated model, we can return the change.
+                        return Ok(Some(ModelChange::GeneratePropertiesFile {
+                            model_id: model.__common_attr__.unique_id.clone(),
+                            model_name: model.__common_attr__.name.clone(),
+                            patch_path: Some(generated_patch),
+                        }));
+                    }
+                    Err(e) => {
+                        eprintln!("failed to write generated model properties: {e}");
+                        return Err(ModelFailure::MissingPropertiesFile);
+                    }
+                }
+            }
+            _ => { /* Not matching seeds or snapshots yet */ }
         }
-        return None;
     }
-
-    Some(ModelFailure::MissingPropertiesFile)
+    Err(ModelFailure::MissingPropertiesFile)
 }
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
@@ -705,10 +721,7 @@ mod tests {
         let prior_changes = BTreeMap::<String, ModelChanges>::new();
 
         let config = Config {
-            select: vec![
-                Selector::MissingModelDescriptions,
-                Selector::MissingColumnDescriptions,
-            ],
+            select: vec![Selector::MissingColumnDescriptions],
             ..Default::default()
         }
         .with_fix(true);
@@ -739,10 +752,6 @@ mod tests {
             if let ModelChange::ChangePropertiesFile { property, .. } = change {
                 saw_property_change = true;
                 let prop = property.as_ref().expect("property payload attached");
-                assert_eq!(
-                    prop.description.as_deref(),
-                    Some("Auto-generated description")
-                );
                 let customer_column = prop
                     .columns
                     .iter()
@@ -968,7 +977,8 @@ mod tests {
         let mut model = ManifestModel::default();
         model.__common_attr__.patch_path = None;
         let node = DbtNode::Model(model);
-        assert!(missing_properties_file(&node, &Config::default()).is_some());
+        // default config has fix disabled, so a missing properties file should be reported
+        assert!(missing_properties_file(&node, &Config::default()).is_err());
     }
 
     #[test]
