@@ -291,46 +291,72 @@ fn check_model_column(
 ) -> ColumnResult {
     let mut failures: Vec<ColumnFailure> = Vec::new();
     let mut changes: Vec<ColumnChange> = Vec::new();
-
-    if config.is_selected(Selector::MissingColumnDescriptions)
-        && columns::missing_description(original_column, config).is_some()
-    {
-        if !config.is_fixable(Selector::MissingColumnDescriptions) {
-            failures.push(ColumnFailure::DescriptionMissing);
-        } else if let Some(new_description_text) = get_upstream_col_desc(
-            manifest,
-            Some(prior_changes),
-            &model.__common_attr__.unique_id,
-            original_column.name.as_str(),
-            config,
-        ) {
-            let old_description = original_column.description.clone();
-            let new_description = Some(new_description_text);
-
-            let model_id = model.__common_attr__.unique_id.clone();
-            let model_name = model_id.rsplit('.').next().unwrap_or(&model_id).to_string();
-            let patch_path = model.__common_attr__.patch_path.clone();
-
-            let column_mut = Arc::make_mut(working_column);
-            column_mut.description = new_description.clone();
-
-            changes.push(ColumnChange::DescriptionChanged {
-                model_id,
-                model_name,
-                patch_path,
-                column_name: original_column.name.clone(),
-                old: old_description,
-                new: new_description.clone(),
-            });
-        } else {
-            failures.push(ColumnFailure::DescriptionMissing);
-        }
+    match missing_column_description(
+        manifest,
+        model,
+        original_column,
+        working_column,
+        prior_changes,
+        config,
+    ) {
+        Ok(Some(change)) => changes.push(change),
+        Ok(None) => {}
+        Err(failure) => failures.push(failure),
     }
 
     ColumnResult {
         column_name: original_column.name.clone(),
         failures,
         changes,
+    }
+}
+
+fn missing_column_description(
+    manifest: &DbtManifestV12,
+    model: &ManifestModel,
+    original_column: &DbtColumnRef,
+    working_column: &mut DbtColumnRef,
+    prior_changes: &BTreeMap<String, ModelChanges>,
+    config: &Config,
+) -> Result<Option<ColumnChange>, ColumnFailure> {
+    // If the selector is not enabled, or the column already has a description,
+    // skip attempting to source a description from upstream.
+    if !config.is_selected(Selector::MissingColumnDescriptions)
+        || columns::missing_description(original_column, config).is_none()
+    {
+        return Ok(None);
+    }
+
+    if !config.is_fixable(Selector::MissingColumnDescriptions) {
+        return Err(ColumnFailure::DescriptionMissing);
+    }
+    if let Some(new_description_text) = get_upstream_col_desc(
+        manifest,
+        Some(prior_changes),
+        &model.__common_attr__.unique_id,
+        original_column.name.as_str(),
+        config,
+    ) {
+        let old_description = original_column.description.clone();
+        let new_description = Some(new_description_text);
+
+        let model_id = model.__common_attr__.unique_id.clone();
+        let model_name = model_id.rsplit('.').next().unwrap_or(&model_id).to_string();
+        let patch_path = model.__common_attr__.patch_path.clone();
+
+        let column_mut = Arc::make_mut(working_column);
+        column_mut.description = new_description.clone();
+
+        return Ok(Some(ColumnChange::DescriptionChanged {
+            model_id,
+            model_name,
+            patch_path,
+            column_name: original_column.name.clone(),
+            old: old_description,
+            new: new_description.clone(),
+        }));
+    } else {
+        Err(ColumnFailure::DescriptionMissing)
     }
 }
 
