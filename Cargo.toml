@@ -71,6 +71,7 @@ tempfile = "3.6"
 assert_cmd = "2.0"
 assert_fs = "1.1"
 fs_extra = "1.2"
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [package.metadata.release]
 allow-branch = ["main"]
@@ -80,3 +81,7 @@ push = true
 push-remote = "origin"
 sign-tag = true
 sign-commit = true
+
+[[bench]]
+name = "my_benchmark"
+harness = false
