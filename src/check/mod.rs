@@ -1,4 +1,7 @@
-use crate::config::Config;
+use crate::{
+    config::Config,
+    graph::DbtGraph,
+};
 use dbt_dag::deps_mgmt::topological_sort;
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode};
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,8 +15,7 @@ use exposures::check_exposures;
 use models::check_model;
 use sources::check_sources;
 
-pub use crate::change_descriptors::ColumnChange;
-pub use crate::change_descriptors::{ModelChange, ModelChanges};
+pub use crate::change_descriptors::{ModelChange, ModelChanges, ColumnChange};
 pub use columns::{ColumnFailure, ColumnResult};
 pub use exposures::{ExposureChange, ExposureFailure, ExposureResult};
 pub use models::{ModelFailure, ModelResult};
@@ -65,13 +67,14 @@ where
     let mut result = CheckResult::default();
     let mut accumulated_changes: BTreeMap<String, ModelChanges> = BTreeMap::new();
     let sorted_nodes = nodes_in_dag_order(manifest);
+    let graph = DbtGraph::from(manifest);
 
     for node_id in sorted_nodes {
         let Some(DbtNode::Model(_)) = manifest.nodes.get(&node_id) else {
             continue;
         };
 
-        let model_result = check_model(manifest, &node_id, &accumulated_changes, config);
+        let model_result = check_model(manifest, &graph,  &node_id, &accumulated_changes, config);
 
         if let Some(changes) = model_result.changes() {
             accumulated_changes.insert(changes.model_id.clone(), changes.clone());

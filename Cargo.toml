@@ -40,6 +40,7 @@ thiserror = "~1"
 toml = "~0.9"
 strum = "~0.27"
 parquet = { git = "https://github.com/sdf-labs/arrow-rs", package = "parquet", rev = "e4924d7d6d07bb12ba6628e595f9f58c2c02c9a1" }
+petgraph = "~0.8"
 
 [patch.crates-io]
 

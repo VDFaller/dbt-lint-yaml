@@ -5,4 +5,5 @@ pub mod config;
 pub mod osmosis;
 pub mod project;
 pub mod writeback;
+pub mod graph;
 pub use check::{CheckEvent, check_all, check_all_with_report};

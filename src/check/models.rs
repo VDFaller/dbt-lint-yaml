@@ -4,9 +4,11 @@ use crate::codegen::write_generated_model;
 use crate::{
     check::columns::check_model_columns,
     config::{Config, Selector},
+    graph::DbtGraph,
     writeback::properties::model_property_from_manifest_differences,
 };
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel};
+use petgraph::algo::has_path_connecting;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::path::PathBuf;
@@ -123,6 +125,7 @@ impl Display for ModelResult {
 
 pub(crate) fn check_model(
     manifest: &DbtManifestV12,
+    graph: &DbtGraph,
     model_id: &str,
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
@@ -191,7 +194,7 @@ pub(crate) fn check_model(
     if let Err(failure) = direct_join_to_source(&working_model, config) {
         failures.push(failure)
     }
-    if let Err(failure) = model_fanout(manifest, model_id, config) {
+    if let Err(failure) = model_fanout(graph, model_id, config) {
         failures.push(failure)
     }
     if let Err(failure) = root_model(&working_model, config) {
@@ -200,10 +203,10 @@ pub(crate) fn check_model(
     if let Err(failure) = multiple_sources_joined(&working_model, config) {
         failures.push(failure)
     }
-    if let Err(failure) = rejoining_of_upstream_concepts(manifest, &working_model, config) {
+    if let Err(failure) = rejoining_of_upstream_concepts(graph, &working_model, config) {
         failures.push(failure)
     }
-    if let Err(failure) = dead_model(&working_model, manifest, config) {
+    if let Err(failure) = dead_model(&working_model, graph, config) {
         failures.push(failure)
     }
 
@@ -429,18 +432,15 @@ fn missing_properties_file(
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
 /// snapshots are not counted in fanout
 fn model_fanout(
-    manifest: &DbtManifestV12,
+    graph: &DbtGraph,
     model_id: &str,
     config: &Config,
 ) -> Result<(), ModelFailure> {
     if !config.is_selected(Selector::ModelFanout) {
         return Ok(());
     }
-    let downstream_models = manifest
-        .child_map
-        .get(model_id)
-        .into_iter()
-        .flatten()
+    let downstream_models = graph
+        .children(model_id)
         .filter(|id| id.starts_with("model."))
         .count();
 
@@ -535,7 +535,7 @@ fn model_separate_from_properties_file(
 
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#rejoining-of-upstream-concepts
 fn rejoining_of_upstream_concepts(
-    manifest: &DbtManifestV12,
+    graph: &DbtGraph,
     model: &ManifestModel,
     config: &Config,
 ) -> Result<(), ModelFailure> {
@@ -546,12 +546,15 @@ fn rejoining_of_upstream_concepts(
 
     let mut rejoined: BTreeSet<String> = BTreeSet::new();
 
-    for upstream_id in base_dependencies {
-        if let Some(DbtNode::Model(upstream_model)) = manifest.nodes.get(upstream_id) {
-            let upstream_dependencies = &upstream_model.__base_attr__.depends_on.nodes;
-            for dep in upstream_dependencies {
-                if base_dependencies.contains(dep) {
-                    rejoined.insert(dep.clone());
+    for p in base_dependencies.iter() {
+        for q in base_dependencies.iter() {
+            if p == q {
+                continue;
+            }
+            if let (Some(&p_idx), Some(&q_idx)) = (graph.index.get(p), graph.index.get(q)) {
+                // if there's a path q -> p then q is rejoined
+                if has_path_connecting(&graph.graph, q_idx, p_idx, None) {
+                    rejoined.insert(q.clone());
                 }
             }
         }
@@ -641,26 +644,20 @@ fn model_type(model: &ManifestModel) -> &str {
 /// Tests, Unit tests, do not count as dependencies
 fn dead_model(
     model: &ManifestModel,
-    manifest: &DbtManifestV12,
+    graph: &DbtGraph,
     config: &Config,
 ) -> Result<(), ModelFailure> {
     if !config.is_selected(Selector::DeadModel) {
         return Ok(());
     }
-    // A model is considered dead if no other models depend on it
+    // A model is considered dead if no other non-test/unit_test nodes depend on it
     let model_id = &model.__common_attr__.unique_id;
-    let child_map = &manifest.child_map;
-    let is_dead = match child_map.get(model_id) {
-        None => true,
-        Some(children) => {
-            let downstream_models: Vec<&String> = children
-                .iter()
-                .filter(|id| !id.starts_with("test.") && !id.starts_with("unit_test."))
-                .collect();
-            downstream_models.is_empty()
-        }
-    };
-    if is_dead {
+    let downstream_non_test_count = graph
+        .children(model_id)
+        .filter(|id| !id.starts_with("test.") && !id.starts_with("unit_test."))
+        .count();
+
+    if downstream_non_test_count == 0 {
         Err(ModelFailure::DeadModel)
     } else {
         Ok(())
@@ -725,7 +722,14 @@ mod tests {
             ..Default::default()
         }
         .with_fix(true);
-        let model_result = check_model(&manifest, "model.test.downstream", &prior_changes, &config);
+        let graph = DbtGraph::from(&manifest);
+        let model_result = check_model(
+            &manifest,
+            &graph,
+            "model.test.downstream",
+            &prior_changes,
+            &config,
+        );
 
         let changes = model_result
             .changes()
@@ -874,6 +878,7 @@ mod tests {
                 "model.test.downstream_3".to_string(),
             ],
         );
+        let graph = DbtGraph::from(&manifest);
 
         let config = Config {
             model_fanout_threshold: 1,
@@ -881,15 +886,15 @@ mod tests {
         };
 
         assert!(
-            model_fanout(&manifest, "model.test.one_model", &config).is_ok(),
+            model_fanout(&graph, "model.test.one_model", &config).is_ok(),
             "only 1 downstream"
         );
         assert!(
-            model_fanout(&manifest, "model.test.lots_of_tests", &config).is_ok(),
+            model_fanout(&graph, "model.test.lots_of_tests", &config).is_ok(),
             "lots of tests should not trigger"
         );
         assert!(
-            model_fanout(&manifest, "model.test.four_models", &config).is_err(),
+            model_fanout(&graph, "model.test.four_models", &config).is_err(),
             "4 models exceeds threshold of 1"
         );
     }
@@ -924,43 +929,35 @@ mod tests {
 
     #[test]
     fn test_rejoining_of_upstream_concepts() {
-        let mut manifest = DbtManifestV12::default();
+        // looks like:
+        // upstream --> midstream --> downstream
+        //    \----------------------->/
+        let mut graph = petgraph::Graph::<String, ()>::new();
+        let upstream_idx = graph.add_node("model.test.upstream".to_string());
+        let midstream_idx = graph.add_node("model.test.midstream".to_string());
+        let downstream_idx = graph.add_node("model.test.downstream".to_string());
+        graph.add_edge(upstream_idx, midstream_idx, ());
+        graph.add_edge(midstream_idx, downstream_idx, ());
+        graph.add_edge(upstream_idx, downstream_idx, ());
 
-        manifest.nodes.insert(
-            "model.test.upstream".to_string(),
-            DbtNode::Model(Default::default()),
-        );
-        manifest.nodes.insert(
-            "model.test.midstream".to_string(),
-            DbtNode::Model(Default::default()),
-        );
-        manifest.nodes.insert(
-            "model.test.downstream".to_string(),
-            DbtNode::Model(Default::default()),
-        );
-
-        if let Some(DbtNode::Model(upstream)) = manifest.nodes.get_mut("model.test.upstream") {
-            upstream.__common_attr__.unique_id = "model.test.upstream".to_string();
-        }
-
-        if let Some(DbtNode::Model(midstream)) = manifest.nodes.get_mut("model.test.midstream") {
-            midstream.__common_attr__.unique_id = "model.test.midstream".to_string();
-            midstream.__base_attr__.depends_on.nodes = vec!["model.test.upstream".to_string()];
-        }
-
-        if let Some(DbtNode::Model(downstream)) = manifest.nodes.get_mut("model.test.downstream") {
-            downstream.__common_attr__.unique_id = "model.test.downstream".to_string();
-            downstream.__base_attr__.depends_on.nodes = vec![
-                "model.test.upstream".to_string(),
-                "model.test.midstream".to_string(),
-            ];
-        }
-
-        let Some(DbtNode::Model(downstream)) = manifest.nodes.get("model.test.downstream") else {
-            panic!("expected downstream model");
-        };
         let config = Config::default();
-        assert!(rejoining_of_upstream_concepts(&manifest, downstream, &config).is_err());
+        let dbt_graph = DbtGraph {
+            graph,
+            index: vec![
+                ("model.test.upstream".to_string(), upstream_idx),
+                ("model.test.midstream".to_string(), midstream_idx),
+                ("model.test.downstream".to_string(), downstream_idx),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let mut downstream = ManifestModel::default();
+        downstream.__common_attr__.unique_id = "model.test.downstream".to_string();
+        downstream.__base_attr__.depends_on.nodes = vec![
+            "model.test.upstream".to_string(),
+            "model.test.midstream".to_string(),
+        ];
+        assert!(rejoining_of_upstream_concepts(&dbt_graph, &downstream, &config).is_err());
     }
 
     #[test]
@@ -1016,6 +1013,7 @@ mod tests {
             select: vec![Selector::DeadModel],
             ..Default::default()
         };
-        assert!(dead_model(model, &manifest, &config).is_err());
+        let graph = DbtGraph::from(&manifest);
+        assert!(dead_model(model, &graph, &config).is_err());
     }
 }
