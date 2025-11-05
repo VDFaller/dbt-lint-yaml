@@ -3,7 +3,8 @@ use dbt_lint_yaml::{
     change_descriptors::ColumnChange,
     check::{CheckEvent, check_all_with_report},
     config::ConfigFile,
-    load_project_from_cli_args, writeback,
+    project::load_project_from_cli_args,
+    writeback,
 };
 use std::ffi::OsString;
 
