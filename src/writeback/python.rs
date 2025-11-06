@@ -1,5 +1,6 @@
 use super::WriteBackError;
 use crate::change_descriptors::{ModelChange, ModelChanges};
+use crate::config::ModelPropertiesLayout;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -29,6 +30,35 @@ struct PythonResponse {
     updated_columns: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct LayoutRequest {
+    current_patch: String,
+    expected_patch: String,
+    model_name: String,
+    layout: ModelPropertiesLayout,
+}
+
+impl LayoutRequest {
+    fn new(
+        current_patch: &Path,
+        expected_patch: &Path,
+        model_name: &str,
+        layout: ModelPropertiesLayout,
+    ) -> Self {
+        Self {
+            current_patch: current_patch.to_string_lossy().into_owned(),
+            expected_patch: expected_patch.to_string_lossy().into_owned(),
+            model_name: model_name.to_string(),
+            layout,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LayoutResponse {
+    mutated: bool,
+}
+
 pub fn apply_with_python(
     project_root: &Path,
     changes: &BTreeMap<String, ModelChanges>,
@@ -38,6 +68,7 @@ pub fn apply_with_python(
     }
 
     let helper_path = resolve_helper_path()?;
+    let mut layout_helper_path: Option<std::path::PathBuf> = None;
 
     let mut results = Vec::new();
 
@@ -56,8 +87,11 @@ pub fn apply_with_python(
             project_root.join(patch_path)
         };
 
+        let model_name = extract_model_name(&model_changes.model_id);
+
         let mut model_description_change: Option<String> = None;
         let mut property_payload: Option<&crate::writeback::properties::ModelProperty> = None;
+        let mut layout_mutated = false;
 
         for change in &model_changes.changes {
             match change {
@@ -98,6 +132,52 @@ pub fn apply_with_python(
                         property_payload = Some(prop);
                     }
                 }
+                ModelChange::NormalizePropertiesLayout {
+                    current_patch,
+                    expected_patch,
+                    layout,
+                    ..
+                } => {
+                    let current_patch =
+                        current_patch
+                            .as_ref()
+                            .ok_or_else(|| WriteBackError::PatchPathMissing {
+                                model_id: model_changes.model_id.clone(),
+                            })?;
+
+                    let resolved_current = if current_patch.is_absolute() {
+                        current_patch.clone()
+                    } else {
+                        project_root.join(current_patch)
+                    };
+
+                    let resolved_expected = if expected_patch.is_absolute() {
+                        expected_patch.clone()
+                    } else {
+                        project_root.join(expected_patch)
+                    };
+
+                    if resolved_current != resolved_expected {
+                        if layout_helper_path.is_none() {
+                            layout_helper_path = Some(resolve_layout_helper_path()?);
+                        }
+                        let helper = layout_helper_path.as_ref().expect("layout helper set");
+                        let mutated = invoke_layout_helper(
+                            helper,
+                            LayoutRequest::new(
+                                &resolved_current,
+                                &resolved_expected,
+                                model_name,
+                                *layout,
+                            ),
+                        )?;
+                        if mutated {
+                            layout_mutated = true;
+                        }
+                    }
+
+                    resolved_path = resolved_expected;
+                }
                 other => {
                     return Err(WriteBackError::UnsupportedModelChange {
                         model_id: model_changes.model_id.clone(),
@@ -106,8 +186,6 @@ pub fn apply_with_python(
                 }
             }
         }
-
-        let model_name = extract_model_name(&model_changes.model_id);
 
         let mut column_changes: Vec<PythonColumnChange> = Vec::new();
         if let Some(prop) = property_payload {
@@ -129,7 +207,7 @@ pub fn apply_with_python(
         }
 
         if column_changes.is_empty() && model_description_change.is_none() {
-            if !model_changes.changes.is_empty() {
+            if layout_mutated || !model_changes.changes.is_empty() {
                 results.push((model_changes.model_id.clone(), Vec::new()));
             }
             continue;
@@ -143,7 +221,8 @@ pub fn apply_with_python(
         };
 
         let response = invoke_python_helper(&helper_path, &request)?;
-        results.push((model_changes.model_id.clone(), response.updated_columns));
+        let updated_columns = response.updated_columns;
+        results.push((model_changes.model_id.clone(), updated_columns));
     }
 
     Ok(results)
@@ -178,6 +257,68 @@ fn resolve_helper_path() -> Result<std::path::PathBuf, WriteBackError> {
     }
 
     Err(WriteBackError::HelperMissing(fallback))
+}
+
+fn resolve_layout_helper_path() -> Result<std::path::PathBuf, WriteBackError> {
+    if let Ok(path) = std::env::var("DBT_LINT_YAML_LAYOUT_HELPER") {
+        let path = std::path::PathBuf::from(path);
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(WriteBackError::HelperMissing(path));
+    }
+
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(dir) = exe_path.parent()
+    {
+        candidates.push(dir.join("ruamel_normalize_layout.py"));
+        candidates.push(dir.join("scripts").join("ruamel_normalize_layout.py"));
+    }
+
+    let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts/ruamel_normalize_layout.py");
+    candidates.push(fallback.clone());
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(WriteBackError::HelperMissing(fallback))
+}
+
+fn invoke_layout_helper(
+    helper_path: &Path,
+    request: LayoutRequest,
+) -> Result<bool, WriteBackError> {
+    let mut command = Command::new("python3");
+    command.arg(helper_path);
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let json = serde_json::to_vec(&request)?;
+        stdin.write_all(&json)?;
+    }
+
+    let output = child.wait_with_output()?;
+
+    if !output.status.success() {
+        let status = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WriteBackError::PythonFailure { status, stderr });
+    }
+
+    let response: LayoutResponse =
+        serde_json::from_slice(&output.stdout).map_err(WriteBackError::ResponseParseFailure)?;
+
+    Ok(response.mutated)
 }
 
 fn invoke_python_helper(

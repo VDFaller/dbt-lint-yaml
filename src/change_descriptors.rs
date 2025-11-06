@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use crate::writeback::changes::ExecutableChange;
+use crate::config::ModelPropertiesLayout;
 use crate::writeback::properties::{ModelProperty, SourceProperty};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,13 +38,13 @@ pub enum ModelChange {
         patch_path: Option<PathBuf>,
         property: Option<ModelProperty>,
     },
-}
-
-impl ModelChange {
-    /// Return a boxed executable change for existing code paths.
-    pub fn new_executable(&self) -> Box<dyn ExecutableChange> {
-        Box::new(self.clone())
-    }
+    NormalizePropertiesLayout {
+        model_id: String,
+        model_name: String,
+        current_patch: Option<PathBuf>,
+        expected_patch: PathBuf,
+        layout: ModelPropertiesLayout,
+    },
 }
 
 #[derive(Default, Debug, Clone)]
@@ -53,19 +53,6 @@ pub struct ModelChanges {
     pub patch_path: Option<PathBuf>,
     pub changes: Vec<ModelChange>,
     pub column_changes: BTreeMap<String, BTreeSet<ColumnChange>>,
-}
-
-impl ModelChanges {
-    /// Produce a list of executable writeback ops (columns + model-level).
-    pub fn to_writeback_ops(&self) -> Vec<Box<dyn ExecutableChange>> {
-        let mut ops: Vec<Box<dyn ExecutableChange>> = Vec::new();
-
-        for change in &self.changes {
-            ops.push(change.new_executable());
-        }
-
-        ops
-    }
 }
 
 #[derive(Debug, Clone)]

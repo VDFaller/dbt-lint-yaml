@@ -1,11 +1,11 @@
 use super::WriteBackError;
 use crate::change_descriptors::ModelChange;
 use crate::check::ModelChanges;
-use crate::writeback::changes::ExecutableChange;
-use crate::writeback::properties::PropertyFile;
+use crate::writeback::properties::{ColumnProperty, ModelProperty, PropertyFile};
 use dbt_serde_yaml;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub fn apply_with_rust(
     project_root: &Path,
@@ -26,14 +26,13 @@ pub fn apply_with_rust(
                     model_id: model_changes.model_id.clone(),
                 })?;
 
-        let resolved_path = if patch_path.is_absolute() {
+        let mut resolved_path = if patch_path.is_absolute() {
             patch_path.clone()
         } else {
             project_root.join(patch_path)
         };
 
-        let yaml_str = std::fs::read_to_string(&resolved_path)?;
-        let mut docs: PropertyFile = dbt_serde_yaml::from_str(&yaml_str)?;
+        let mut docs = read_property_file(&resolved_path)?;
 
         let mut updated_columns = Vec::new();
         let mut file_mutated = false;
@@ -49,22 +48,143 @@ pub fn apply_with_rust(
             }
         }
 
-        // Ask the ModelChanges to produce executable writeback ops (columns + model-level)
-        let ops: Vec<Box<dyn ExecutableChange>> = model_changes.to_writeback_ops();
+        // Execute each change in sequence, applying filesystem and in-memory effects.
+        for change in &model_changes.changes {
+            match change {
+                ModelChange::MovePropertiesFile {
+                    patch_path,
+                    new_path,
+                    ..
+                } => {
+                    let patch =
+                        patch_path
+                            .clone()
+                            .ok_or_else(|| WriteBackError::PatchPathMissing {
+                                model_id: model_changes.model_id.clone(),
+                            })?;
+                    let src = if patch.is_absolute() {
+                        patch
+                    } else {
+                        project_root.join(patch)
+                    };
+                    let dst = if new_path.is_absolute() {
+                        new_path.clone()
+                    } else {
+                        project_root.join(new_path)
+                    };
+                    if let Some(parent) = dst.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::rename(&src, &dst)?;
+                    resolved_path = dst;
+                }
+                ModelChange::ChangePropertiesFile {
+                    model_name,
+                    property,
+                    ..
+                } => {
+                    let Some(prop) = property else {
+                        continue;
+                    };
 
-        // Apply ops; filesystem-affecting ops are performed via apply_with_fs
-        for op in ops.iter() {
-            let mutated = op.apply_with_fs(&mut docs, project_root)?;
-            if !mutated.is_empty() {
-                file_mutated = true;
-                updated_columns.extend(mutated);
+                    if let Some(existing) = docs.find_model_mut(model_name) {
+                        existing.merge(prop);
+                    } else {
+                        let mut new_prop = prop.clone();
+                        if new_prop.name.is_none() {
+                            new_prop.name = Some(model_name.clone());
+                        }
+                        docs.models.get_or_insert_with(Vec::new).push(new_prop);
+                    }
+
+                    file_mutated = true;
+                    updated_columns.push(format!("@model:{}", model_name));
+                }
+                ModelChange::GeneratePropertiesFile { .. } => {
+                    // The check phase already wrote the properties file; nothing to do.
+                }
+                ModelChange::NormalizePropertiesLayout {
+                    model_id,
+                    model_name,
+                    current_patch,
+                    expected_patch,
+                    layout,
+                } => {
+                    let expected_path = if expected_patch.is_absolute() {
+                        expected_patch.clone()
+                    } else {
+                        project_root.join(expected_patch)
+                    };
+
+                    let mutated = match layout {
+                        crate::config::ModelPropertiesLayout::PerDirectory => {
+                            normalize_to_directory(
+                                &mut docs,
+                                project_root,
+                                model_id,
+                                model_name,
+                                current_patch,
+                                expected_patch,
+                            )?
+                        }
+                        crate::config::ModelPropertiesLayout::PerModel => normalize_to_model(
+                            &mut docs,
+                            project_root,
+                            model_id,
+                            model_name,
+                            current_patch,
+                            expected_patch,
+                        )?,
+                    };
+
+                    resolved_path = expected_path;
+                    if mutated {
+                        file_mutated = true;
+                        updated_columns.push(format!("@model:{}", model_name));
+                    }
+                }
+                ModelChange::MoveModelFile {
+                    patch_path,
+                    new_path,
+                    ..
+                } => {
+                    let patch =
+                        patch_path
+                            .clone()
+                            .ok_or_else(|| WriteBackError::PatchPathMissing {
+                                model_id: model_changes.model_id.clone(),
+                            })?;
+                    let src = if patch.is_absolute() {
+                        patch
+                    } else {
+                        project_root.join(patch)
+                    };
+                    let dst = if new_path.is_absolute() {
+                        new_path.clone()
+                    } else {
+                        project_root.join(new_path)
+                    };
+                    if let Some(parent) = dst.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::rename(&src, &dst)?;
+                }
             }
         }
 
         // Persist YAML if we mutated in-memory docs
         if file_mutated {
-            let out_str = dbt_serde_yaml::to_string(&docs)?;
-            std::fs::write(&resolved_path, out_str)?;
+            if property_file_is_empty(&docs) {
+                if resolved_path.exists() {
+                    std::fs::remove_file(&resolved_path)?;
+                }
+            } else {
+                let out_str = dbt_serde_yaml::to_string(&docs)?;
+                if let Some(parent) = resolved_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&resolved_path, out_str)?;
+            }
         }
 
         if file_mutated {
@@ -84,11 +204,188 @@ pub fn apply_with_rust(
     Ok(results)
 }
 
+fn normalize_to_directory(
+    target_root: &mut PropertyFile,
+    project_root: &Path,
+    model_id: &str,
+    model_name: &str,
+    current_patch: &Option<PathBuf>,
+    expected_patch: &PathBuf,
+) -> Result<bool, WriteBackError> {
+    let current = current_patch
+        .clone()
+        .ok_or_else(|| WriteBackError::PatchPathMissing {
+            model_id: model_id.to_string(),
+        })?;
+
+    if &current == expected_patch {
+        return Ok(false);
+    }
+
+    let current_path = resolve_patch_path(project_root, &current);
+
+    let mut source_doc = read_property_file(&current_path)?;
+    let property = extract_model_property(model_id, model_name, &mut source_doc)?;
+
+    upsert_model_property(target_root, property);
+
+    write_or_remove_property_file(&current_path, &source_doc)?;
+
+    Ok(true)
+}
+
+fn normalize_to_model(
+    target_root: &mut PropertyFile,
+    project_root: &Path,
+    model_id: &str,
+    model_name: &str,
+    current_patch: &Option<PathBuf>,
+    expected_patch: &PathBuf,
+) -> Result<bool, WriteBackError> {
+    let current = current_patch
+        .clone()
+        .ok_or_else(|| WriteBackError::PatchPathMissing {
+            model_id: model_id.to_string(),
+        })?;
+
+    if &current == expected_patch {
+        return Ok(false);
+    }
+
+    let current_path = resolve_patch_path(project_root, &current);
+
+    let mut source_doc = read_property_file(&current_path)?;
+    let property = extract_model_property(model_id, model_name, &mut source_doc)?;
+
+    target_root.models = Some(vec![property]);
+    target_root.sources = None;
+
+    write_or_remove_property_file(&current_path, &source_doc)?;
+
+    Ok(true)
+}
+
+fn resolve_patch_path(project_root: &Path, patch_path: &Path) -> PathBuf {
+    if patch_path.is_absolute() {
+        patch_path.to_path_buf()
+    } else {
+        project_root.join(patch_path)
+    }
+}
+
+fn read_property_file(path: &Path) -> Result<PropertyFile, WriteBackError> {
+    if !path.exists() {
+        return Ok(PropertyFile {
+            models: None,
+            sources: None,
+            extras: Default::default(),
+        });
+    }
+
+    let contents = fs::read_to_string(path)?;
+    let doc = dbt_serde_yaml::from_str(&contents)?;
+    Ok(doc)
+}
+
+fn write_or_remove_property_file(path: &Path, doc: &PropertyFile) -> Result<(), WriteBackError> {
+    if property_file_is_empty(doc) {
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        return Ok(());
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let yaml = dbt_serde_yaml::to_string(doc)?;
+    fs::write(path, yaml)?;
+    Ok(())
+}
+
+fn extract_model_property(
+    model_id: &str,
+    model_name: &str,
+    doc: &mut PropertyFile,
+) -> Result<ModelProperty, WriteBackError> {
+    let Some(models) = doc.models.as_mut() else {
+        return Err(WriteBackError::ModelMissing {
+            model_id: model_id.to_string(),
+        });
+    };
+
+    if let Some(idx) = models
+        .iter()
+        .position(|model| model.name.as_deref() == Some(model_name))
+    {
+        let mut property = models.remove(idx);
+        if models.is_empty() {
+            doc.models = None;
+        }
+        if property.name.is_none() {
+            property.name = Some(model_name.to_string());
+        }
+        return Ok(property);
+    }
+
+    Err(WriteBackError::ModelMissing {
+        model_id: model_id.to_string(),
+    })
+}
+
+fn upsert_model_property(doc: &mut PropertyFile, property: ModelProperty) {
+    let models = doc.models.get_or_insert_with(Vec::new);
+    if let Some(existing) = models
+        .iter_mut()
+        .find(|model| model.name.as_deref() == property.name.as_deref())
+    {
+        merge_model_property(existing, &property);
+    } else {
+        models.push(property);
+    }
+}
+
+fn merge_model_property(target: &mut ModelProperty, source: &ModelProperty) {
+    if target.description.is_none() {
+        target.description = source.description.clone();
+    }
+
+    let mut lookup: BTreeMap<String, &ColumnProperty> = BTreeMap::new();
+    for column in &source.columns {
+        lookup.insert(column.name.clone(), column);
+    }
+
+    for column in &mut target.columns {
+        if let Some(other) = lookup.get(&column.name)
+            && other.description.is_some()
+        {
+            column.description = other.description.clone();
+        }
+    }
+
+    for column in source.columns.iter() {
+        if !target.columns.iter().any(|c| c.name == column.name) {
+            target.columns.push(column.clone());
+        }
+    }
+}
+
+fn property_file_is_empty(doc: &PropertyFile) -> bool {
+    doc.models.as_ref().is_none_or(|models| models.is_empty())
+        && doc
+            .sources
+            .as_ref()
+            .is_none_or(|sources| sources.is_empty())
+        && doc.extras.is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::change_descriptors::{ColumnChange, ModelChange};
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
 
     fn sample_yaml() -> &'static str {
@@ -182,5 +479,33 @@ models:
         assert_eq!(res.len(), 1);
         let written = fs::read_to_string(dir.path().join("models.yml")).unwrap();
         assert!(written.contains("Appended"));
+    }
+
+    #[test]
+    fn rust_writeback_moves_properties_file() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("models.yml");
+        fs::write(&file, sample_yaml()).unwrap();
+
+        let mut changes = std::collections::BTreeMap::new();
+        let mut mc = ModelChanges {
+            model_id: "model.jaffle_shop.stg_order_items".to_string(),
+            patch_path: Some(Path::new("models.yml").to_path_buf()),
+            ..Default::default()
+        };
+        mc.changes.push(ModelChange::MovePropertiesFile {
+            model_id: mc.model_id.clone(),
+            model_name: "stg_order_items".to_string(),
+            patch_path: mc.patch_path.clone(),
+            new_path: Path::new("nested").join("models.yml"),
+        });
+        changes.insert(mc.model_id.clone(), mc);
+
+        let res = apply_with_rust(dir.path(), &changes).unwrap();
+        assert_eq!(res.len(), 1);
+
+        assert!(!file.exists(), "original file should be moved");
+        let new_file = dir.path().join("nested/models.yml");
+        assert!(new_file.exists(), "moved file should exist");
     }
 }

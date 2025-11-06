@@ -3,7 +3,7 @@ use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
 use crate::codegen::write_generated_model;
 use crate::{
     check::columns::check_model_columns,
-    config::{Config, Selector},
+    config::{Config, ModelPropertiesLayout, Selector},
     writeback::properties::model_property_from_manifest_differences,
 };
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel};
@@ -31,6 +31,19 @@ pub enum ModelFailure {
         patch_path: PathBuf,
         original_file_path: PathBuf,
     },
+    ModelPropertiesLayoutMismatch {
+        expected: PathBuf,
+        actual: Option<PathBuf>,
+    },
+    ModelPropertiesEntryMissing {
+        patch_path: PathBuf,
+        model_name: String,
+    },
+    ModelPropertiesReadFailed {
+        patch_path: PathBuf,
+        message: String,
+    },
+    ModelPropertiesProjectRootMissing,
 }
 
 impl Display for ModelFailure {
@@ -56,6 +69,36 @@ impl Display for ModelFailure {
                     patch_path.display(),
                     original_file_path.display()
                 )
+            }
+            ModelFailure::ModelPropertiesLayoutMismatch { expected, actual } => match actual {
+                Some(path) => format!(
+                    " (expected patch path: {}, actual: {})",
+                    expected.display(),
+                    path.display()
+                ),
+                None => format!(
+                    " (expected patch path: {}, actual: missing)",
+                    expected.display()
+                ),
+            },
+            ModelFailure::ModelPropertiesEntryMissing {
+                patch_path,
+                model_name,
+            } => format!(
+                " (patch_path: {}, model: {})",
+                patch_path.display(),
+                model_name
+            ),
+            ModelFailure::ModelPropertiesReadFailed {
+                patch_path,
+                message,
+            } => format!(
+                " (patch_path: {}, error: {})",
+                patch_path.display(),
+                message
+            ),
+            ModelFailure::ModelPropertiesProjectRootMissing => {
+                " (project_dir not configured; cannot apply layout fix)".to_string()
             }
             _ => String::new(),
         };
@@ -159,6 +202,14 @@ pub(crate) fn check_model(
                 working_model.__common_attr__.patch_path = Some(p.clone());
             }
             // we're NOT pushing to model_level_changes here, as the file gets created by the check
+        }
+        Ok(None) => {}
+        Err(failure) => failures.push(failure),
+    }
+
+    match check_properties_layout(&mut working_model, config) {
+        Ok(Some(change)) => {
+            model_level_changes.push(change);
         }
         Ok(None) => {}
         Err(failure) => failures.push(failure),
@@ -426,6 +477,68 @@ fn missing_properties_file(
     Err(ModelFailure::MissingPropertiesFile)
 }
 
+fn check_properties_layout(
+    working_model: &mut ManifestModel,
+    config: &Config,
+) -> Result<Option<ModelChange>, ModelFailure> {
+    if !config.is_selected(Selector::ModelPropertiesLayout) {
+        return Ok(None);
+    }
+
+    let expected_patch = expected_patch_path(working_model, config.model_properties_layout);
+    let actual_patch = working_model.__common_attr__.patch_path.clone();
+
+    let failure = Err(ModelFailure::ModelPropertiesLayoutMismatch {
+        expected: expected_patch.clone().unwrap_or_default(),
+        actual: actual_patch.clone(),
+    });
+
+    if let (Some(expected), Some(actual)) = (&expected_patch, &actual_patch) {
+        if expected == actual {
+            return Ok(None);
+        }
+    } else {
+        // if for some reason expected or actual is None, we have an unfixable mismatch
+        return failure;
+    }
+
+    if !config.is_fixable(Selector::ModelPropertiesLayout) {
+        return failure;
+    }
+
+    // apply the fixes directly to the working model
+    let model_id = working_model.__common_attr__.unique_id.clone();
+    let model_name = working_model.__common_attr__.name.clone();
+    working_model.__common_attr__.patch_path = expected_patch.clone();
+
+    let change = ModelChange::NormalizePropertiesLayout {
+        model_id,
+        model_name,
+        current_patch: actual_patch,
+        expected_patch: expected_patch.unwrap(),
+        layout: config.model_properties_layout,
+    };
+    Ok(Some(change))
+}
+
+/// Determine the expected properties file path for a model given the desired layout.
+/// If ModelPropertiesLayout::PerModel, the expected path is `<model_directory>/<model_name>.yml`.
+/// If ModelPropertiesLayout::PerDirectory, the expected path is `<model_directory>/_<directory_name>__models.yml`.
+fn expected_patch_path(model: &ManifestModel, layout: ModelPropertiesLayout) -> Option<PathBuf> {
+    let original_path = &model.__common_attr__.original_file_path;
+    let parent = original_path.parent()?;
+    match layout {
+        ModelPropertiesLayout::PerModel => {
+            let file_name = format!("{}.yml", model.__common_attr__.name);
+            Some(parent.join(file_name))
+        }
+        ModelPropertiesLayout::PerDirectory => {
+            let dir_name = parent.file_name().and_then(|s| s.to_str())?;
+            Some(parent.join(format!("_{}__models.yml", dir_name)))
+        }
+    }
+}
+
 /// https://dbt-labs.github.io/dbt-project-evaluator/latest/rules/modeling/#model-fanout
 /// snapshots are not counted in fanout
 fn model_fanout(
@@ -670,9 +783,10 @@ fn dead_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::{Config, ModelPropertiesLayout, Selector};
     use dbt_schemas::schemas::manifest::ManifestModel;
     use dbt_schemas::schemas::{dbt_column::DbtColumn, manifest::DbtNode};
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     fn manifest_with_inheritable_column() -> DbtManifestV12 {
@@ -713,6 +827,124 @@ mod tests {
         }
 
         manifest
+    }
+
+    fn base_model() -> ManifestModel {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.jaffle_shop.stg_customers".to_string();
+        model.__common_attr__.name = "stg_customers".to_string();
+        model.__common_attr__.original_file_path =
+            PathBuf::from("models/staging/stg_customers.sql");
+        model.__common_attr__.patch_path = Some(PathBuf::from("models/staging/stg_customers.yml"));
+        model
+    }
+
+    #[test]
+    fn layout_mismatch_without_fix_raises_failure() {
+        let mut working = base_model();
+
+        let config = Config {
+            select: vec![Selector::ModelPropertiesLayout],
+            model_properties_layout: ModelPropertiesLayout::PerDirectory,
+            fix: false,
+            ..Default::default()
+        };
+
+        let result = check_properties_layout(&mut working, &config);
+        assert!(matches!(
+            result,
+            Err(ModelFailure::ModelPropertiesLayoutMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn per_directory_layout_consolidates_files() {
+        let original = base_model();
+        let mut working = original.clone();
+
+        let mut config = Config::default().with_fix(true);
+        config.select = vec![Selector::ModelPropertiesLayout];
+        config.exclude.clear();
+        config.model_properties_layout = ModelPropertiesLayout::PerDirectory;
+        config.project_dir = Some(PathBuf::from("/project"));
+
+        let change = check_properties_layout(&mut working, &config)
+            .expect("layout fix is considered")
+            .expect("layout mismatch should produce change");
+
+        if let ModelChange::NormalizePropertiesLayout {
+            model_id,
+            model_name,
+            current_patch,
+            expected_patch,
+            layout,
+        } = change
+        {
+            assert_eq!(model_id, original.__common_attr__.unique_id);
+            assert_eq!(model_name, original.__common_attr__.name);
+            assert_eq!(
+                current_patch,
+                Some(PathBuf::from("models/staging/stg_customers.yml"))
+            );
+            assert_eq!(
+                expected_patch,
+                PathBuf::from("models/staging/_staging__models.yml")
+            );
+            assert_eq!(layout, ModelPropertiesLayout::PerDirectory);
+        } else {
+            panic!("expected normalize layout change");
+        }
+
+        assert_eq!(
+            working.__common_attr__.patch_path.as_deref(),
+            Some(Path::new("models/staging/_staging__models.yml"))
+        );
+    }
+
+    #[test]
+    fn per_model_layout_splits_directory_file() {
+        let mut original = base_model();
+        original.__common_attr__.patch_path =
+            Some(PathBuf::from("models/staging/_staging__models.yml"));
+        let mut working = original.clone();
+
+        let mut config = Config::default().with_fix(true);
+        config.select = vec![Selector::ModelPropertiesLayout];
+        config.exclude.clear();
+        config.model_properties_layout = ModelPropertiesLayout::PerModel;
+        config.project_dir = Some(PathBuf::from("/project"));
+
+        let change = check_properties_layout(&mut working, &config)
+            .expect("layout fix considered")
+            .expect("layout mismatch should be reported");
+
+        if let ModelChange::NormalizePropertiesLayout {
+            model_id,
+            model_name,
+            current_patch,
+            expected_patch,
+            layout,
+        } = change
+        {
+            assert_eq!(model_id, original.__common_attr__.unique_id);
+            assert_eq!(model_name, original.__common_attr__.name);
+            assert_eq!(
+                current_patch,
+                Some(PathBuf::from("models/staging/_staging__models.yml"))
+            );
+            assert_eq!(
+                expected_patch,
+                PathBuf::from("models/staging/stg_customers.yml")
+            );
+            assert_eq!(layout, ModelPropertiesLayout::PerModel);
+        } else {
+            panic!("expected normalize layout change");
+        }
+
+        assert_eq!(
+            working.__common_attr__.patch_path.as_deref(),
+            Some(Path::new("models/staging/stg_customers.yml"))
+        );
     }
 
     #[test]

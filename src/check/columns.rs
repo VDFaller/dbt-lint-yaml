@@ -53,8 +53,7 @@ impl std::fmt::Display for ColumnResult {
     }
 }
 
-// Column behavior and writeback wrapper are now centralized in
-// `crate::writeback::changes::ColumnChange` and `ExecutableColumnChange`.
+// Column behavior and writeback coordination now flow through `ModelChange` descriptors.
 
 #[derive(Debug, Clone, Copy, AsRefStr, PartialEq, Eq)]
 pub enum ColumnFailure {
