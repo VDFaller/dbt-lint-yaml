@@ -15,7 +15,7 @@ use dbt_schemas::schemas::{
 pub struct ColumnProperty {
     pub name: String,
     pub description: Option<String>,
-    #[serde(flatten)]
+    #[serde(flatten, default)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 
@@ -36,8 +36,9 @@ impl ColumnProperty {
 pub struct ModelProperty {
     pub name: Option<String>,
     pub description: Option<String>,
+    #[serde(default)]
     pub columns: Vec<ColumnProperty>,
-    #[serde(flatten)]
+    #[serde(flatten, default)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 
@@ -173,8 +174,9 @@ pub fn source_property_from_manifest_differences(
 pub struct SourceProperty {
     pub name: String,
     pub description: Option<String>,
+    #[serde(default)]
     pub tables: Vec<ModelProperty>,
-    #[serde(flatten)]
+    #[serde(flatten, default)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 
@@ -208,7 +210,7 @@ impl SourceProperty {
 pub struct PropertyFile {
     pub models: Option<Vec<ModelProperty>>,
     pub sources: Option<Vec<SourceProperty>>,
-    #[serde(flatten)]
+    #[serde(flatten, default)]
     pub extras: BTreeMap<String, dbt_serde_yaml::Value>,
 }
 

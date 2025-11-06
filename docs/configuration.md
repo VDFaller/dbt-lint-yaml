@@ -30,6 +30,7 @@ Top-level keys in `dbt-lint.toml` map to runtime options and selectors. Common k
 - `required_tests`: list of tests required
 - `render_descriptions`: boolean, if false, descriptions will keep their raw jinja format.
 - `writeback`: method for writeback ("python" or "rust")
+- `model_properties_layout`: layout for model properties files ("per_model" or "per_directory")
 - `invalid_descriptions`: array of strings considered invalid placeholders for descriptions
   (default: `["TBD", "FILL ME OUT"]`). Matching is case-insensitive and trimmed, so
   values like `"tbd"`, `"  FILL ME OUT  "` will be treated as missing descriptions.
@@ -116,10 +117,18 @@ Example:
 
 ```
 Unknown config key `models_fanout_threshold`. Did you mean `model_fanout_threshold`?
-Supported keys: select, exclude, fixable, unfixable, model_fanout_threshold, required_tests, render_descriptions, writeback
+Supported keys: select, exclude, fixable, unfixable, model_fanout_threshold, required_tests, render_descriptions, writeback, model_properties_layout
 ```
 
 This helps catch typos early.
+
+Example enabling directory-level properties layout enforcement:
+
+```
+model_properties_layout = "per_directory"
+select = ["model_properties_layout"]
+fixable = ["model_properties_layout"]
+```
 
 
 ## Troubleshooting

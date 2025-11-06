@@ -53,6 +53,8 @@ pub enum Selector {
     // if two models have the same patch path
     #[strum(props(fixable = false))]
     ModelsSeparateFromPropertiesFile,
+    #[strum(props(default = false, fixable = true))]
+    ModelPropertiesLayout,
     #[strum(props(default = false))]
     ExposureDependentOnPrivateModel,
     #[strum(props(default = false))]
@@ -203,6 +205,8 @@ pub struct Config {
     pub render_descriptions: bool,
     #[serde(default = "default_writeback")]
     pub writeback: WritebackMethod,
+    #[serde(default = "default_model_properties_layout")]
+    pub model_properties_layout: ModelPropertiesLayout,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -214,6 +218,17 @@ pub enum WritebackMethod {
 
 fn default_writeback() -> WritebackMethod {
     WritebackMethod::Python
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPropertiesLayout {
+    PerModel,
+    PerDirectory,
+}
+
+fn default_model_properties_layout() -> ModelPropertiesLayout {
+    ModelPropertiesLayout::PerModel
 }
 
 impl Default for Config {
@@ -230,6 +245,7 @@ impl Default for Config {
             invalid_descriptions: default_invalid_descriptions(),
             render_descriptions: false,
             writeback: default_writeback(),
+            model_properties_layout: default_model_properties_layout(),
         }
     }
 }
