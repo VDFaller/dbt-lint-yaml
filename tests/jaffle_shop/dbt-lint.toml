@@ -8,3 +8,11 @@ select = [
     "missing_model_descriptions",
 ]
 model_fanout_threshold = 5
+
+[target.rebase]
+select = [
+    "missing_properties_file",
+    "models_separate_from_properties_file",
+    "model_properties_layout",
+]
+model_properties_layout = "per_directory"
