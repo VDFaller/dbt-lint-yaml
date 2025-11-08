@@ -30,7 +30,10 @@ fn setup_jaffle_shop_fixture(
 // should work on python or rust
 fn base_check(temp: &TempDir) -> Result<(), Box<dyn Error>> {
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
-    cmd.arg("parse").arg("--fix").current_dir(temp.path());
+    cmd.arg("parse")
+        .arg("--fix")
+        .arg("--project-dir")
+        .arg(temp.path().join("tests/jaffle_shop"));
     cmd.assert().failure();
 
     // read the updated file and check for expected description updates
@@ -96,4 +99,45 @@ fn test_parse_fix_updates_order_items_rust() -> Result<(), Box<dyn Error>> {
     "#;
     let temp = setup_jaffle_shop_fixture(Some(toml_override))?;
     base_check(&temp)
+}
+
+#[test]
+#[ignore = "reason: Don't have a profiles.yml yet."]
+fn test_model_properties_layout_rebase() -> Result<(), Box<dyn Error>> {
+    let temp = setup_jaffle_shop_fixture(None)?;
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
+    cmd.arg("parse")
+        .arg("--fix")
+        .arg("-t")
+        .arg("rebase")
+        // using --project-dir so I can have my ENV var and github actions work
+        .arg("--project-dir")
+        .arg(temp.path().join("tests/jaffle_shop"));
+    cmd.assert().success();
+
+    // verify that the models have been moved to per-directory properties files
+    let marts_yml = temp
+        .path()
+        .join("tests/jaffle_shop/models/marts/_marts__models.yml");
+    assert!(marts_yml.exists(), "marts models file was not created");
+
+    let customers_yml = temp
+        .path()
+        .join("tests/jaffle_shop/models/marts/customers.yml");
+    assert!(!customers_yml.exists(), "customers.yml was not deleted");
+
+    // order_items has unit tests so it should exist but shouldn't have model definitions
+    let order_items_yml = temp
+        .path()
+        .join("tests/jaffle_shop/models/marts/order_items.yml");
+    assert!(order_items_yml.exists(), "order_items.yml was not found");
+    let contents = fs::read_to_string(&order_items_yml)?;
+    let properties: PropertyFile = dbt_serde_yaml::from_str(&contents)?;
+    assert!(
+        properties.models.is_none(),
+        "order_items.yml should not have model definitions"
+    );
+
+    Ok(())
 }
