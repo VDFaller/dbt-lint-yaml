@@ -290,11 +290,32 @@ install_binary() {
     chmod +x "$binary_path" 2>/dev/null || true
     install -m 755 "$binary_path" "$DEST/$BINARY_FILENAME" || err_and_exit "failed to install binary" "$DEST/$BINARY_FILENAME"
 
-    script_path=$(find "$td" -type f -name "$SCRIPT_NAME" | head -n 1)
-    [ -n "$script_path" ] || err_and_exit "extracted archive does not contain $SCRIPT_NAME"
+    # Install all helper scripts found under an extracted `scripts/` directory.
+    script_dir=$(find "$td" -type d -name scripts -print -quit)
+    if [ -z "$script_dir" ]; then
+        err_and_exit "extracted archive does not contain scripts/ directory"
+    fi
 
     install -d "$DEST/scripts" || err_and_exit "failed to create helper script directory" "$DEST/scripts"
-    install -m 644 "$script_path" "$DEST/scripts/$SCRIPT_NAME" || err_and_exit "failed to install helper script" "$DEST/scripts/$SCRIPT_NAME"
+
+    found_any=0
+    for f in "$script_dir"/*; do
+        if [ -f "$f" ]; then
+            found_any=1
+            base=$(basename "$f")
+            # Preserve executable bit when present in the archive.
+            if [ -x "$f" ]; then
+                mode=755
+            else
+                mode=644
+            fi
+            install -m "$mode" "$f" "$DEST/scripts/$base" || err_and_exit "failed to install helper script" "$DEST/scripts/$base"
+        fi
+    done
+
+    if [ "$found_any" -eq 0 ]; then
+        err_and_exit "no helper scripts found under scripts/ in the extracted archive"
+    fi
 }
 
 print_path_hint() {

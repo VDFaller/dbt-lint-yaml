@@ -224,14 +224,38 @@ try {
 
     Copy-Item -LiteralPath $ExtractedBinary.FullName -Destination $DestinationBinaryPath -Force
 
-    $ScriptPath = Get-ChildItem -Path $TempDir -Recurse -Filter $ScriptName | Select-Object -First 1
-    if (-not $ScriptPath) {
-        Write-ErrorAndExit "extracted archive does not contain $ScriptName" ""
+    # Install all helper scripts found under an extracted `scripts/` directory.
+    $ScriptDir = Get-ChildItem -Path $TempDir -Recurse -Directory | Where-Object { $_.Name -ieq 'scripts' } | Select-Object -First 1
+    if (-not $ScriptDir) {
+        Write-ErrorAndExit "extracted archive does not contain scripts/ directory" ""
     }
 
     $ScriptsDir = Join-Path $Destination "scripts"
     Ensure-Destination $ScriptsDir
-    Copy-Item -LiteralPath $ScriptPath.FullName -Destination (Join-Path $ScriptsDir $ScriptName) -Force
+
+    $FoundAny = $false
+    foreach ($f in Get-ChildItem -Path $ScriptDir.FullName -File) {
+        $FoundAny = $true
+        $DestPath = Join-Path $ScriptsDir $f.Name
+        Copy-Item -LiteralPath $f.FullName -Destination $DestPath -Force
+
+        # If this installer is running on a POSIX platform under PowerShell, preserve
+        # the executable bit when present in the extracted file.
+        try {
+            if ($IsLinux -or $IsMacOS) {
+                $origMode = (Get-Item $f.FullName).Mode
+                if ($origMode -match 'x') {
+                    & chmod +x $DestPath 2>$null
+                }
+            }
+        } catch {
+            # Non-fatal: best-effort to preserve exec bit.
+        }
+    }
+
+    if (-not $FoundAny) {
+        Write-ErrorAndExit "no helper scripts found under scripts/ in the extracted archive" ""
+    }
 }
 finally {
     if (Test-Path -LiteralPath $TempDir) {
