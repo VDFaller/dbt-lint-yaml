@@ -93,28 +93,25 @@ pub fn missing_description(column: &DbtColumnRef, config: &Config) -> Result<(),
 /// Top-level entrypoint for checking all columns on a model.
 pub fn check_model_columns(
     manifest: &DbtManifestV12,
-    original_model: &ManifestModel,
     working_model: &mut ManifestModel,
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
 ) -> BTreeMap<String, ColumnResult> {
     let mut results: BTreeMap<String, ColumnResult> = BTreeMap::new();
 
-    for (original_column, working_column) in original_model
-        .__base_attr__
-        .columns
-        .iter()
-        .zip(working_model.__base_attr__.columns.iter_mut())
-    {
+    // clone the model id so we don't immutably borrow the whole model while
+    // iterating mutably over its columns
+    let model_id = working_model.__common_attr__.unique_id.clone();
+
+    for working_column in working_model.__base_attr__.columns.iter_mut() {
         let result = check_model_column(
             manifest,
-            original_model,
-            original_column,
+            model_id.as_str(),
             working_column,
             prior_changes,
             config,
         );
-        results.insert(original_column.as_ref().name.clone(), result);
+        results.insert(working_column.name.clone(), result);
     }
 
     results
@@ -125,29 +122,21 @@ pub fn check_model_columns(
 /// apply fixes in-place.
 fn check_model_column(
     manifest: &DbtManifestV12,
-    model: &ManifestModel,
-    original_column: &DbtColumnRef,
+    model_id: &str,
     working_column: &mut DbtColumnRef,
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
 ) -> ColumnResult {
     let mut failures: Vec<ColumnFailure> = Vec::new();
     let mut changes: Vec<ColumnChange> = Vec::new();
-    match missing_column_description(
-        manifest,
-        model,
-        original_column,
-        working_column,
-        prior_changes,
-        config,
-    ) {
+    match missing_column_description(manifest, model_id, working_column, prior_changes, config) {
         Ok(Some(change)) => changes.push(change),
         Ok(None) => {}
         Err(failure) => failures.push(failure),
     }
 
     ColumnResult {
-        column_name: original_column.name.clone(),
+        column_name: working_column.name.clone(),
         failures,
         changes,
     }
@@ -158,8 +147,7 @@ fn check_model_column(
 /// Err(ColumnFailure) if the column is considered failing and no fix was applied.
 fn missing_column_description(
     manifest: &DbtManifestV12,
-    model: &ManifestModel,
-    original_column: &DbtColumnRef,
+    model_id: &str,
     working_column: &mut DbtColumnRef,
     prior_changes: &BTreeMap<String, ModelChanges>,
     config: &Config,
@@ -167,7 +155,7 @@ fn missing_column_description(
     // If the selector is not enabled, or the column already has a description,
     // skip attempting to source a description from upstream.
     if !config.is_selected(Selector::MissingColumnDescriptions)
-        || missing_description(original_column, config).is_ok()
+        || missing_description(working_column, config).is_ok()
     {
         return Ok(None);
     }
@@ -178,8 +166,8 @@ fn missing_column_description(
     if let Some(new_description_text) = get_upstream_col_desc(
         manifest,
         Some(prior_changes),
-        &model.__common_attr__.unique_id,
-        original_column.name.as_str(),
+        model_id,
+        working_column.name.as_str(),
         config,
     ) {
         let column_mut = Arc::make_mut(working_column);

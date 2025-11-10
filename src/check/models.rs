@@ -191,17 +191,12 @@ pub(crate) fn check_model(
     let mut model_level_changes: Vec<ModelChange> = Vec::new();
     let mut property_change_required = false;
 
-    match missing_properties_file(node, config) {
-        Ok(Some(change)) => {
-            // if the returned change contains a patch_path, apply it to the working model
-            if let ModelChange::GeneratePropertiesFile {
-                patch_path: Some(p),
-                ..
-            } = &change
-            {
-                working_model.__common_attr__.patch_path = Some(p.clone());
-            }
-            // we're NOT pushing to model_level_changes here, as the file gets created by the check
+    match missing_properties_file(&mut working_model, config) {
+        Ok(Some(_)) => {
+            property_change_required = true;
+            // not pushing a change here because it's handled immediately
+            // might change this later to record the change and handle later
+            // so that we can respect model_properties_layout
         }
         Ok(None) => {}
         Err(failure) => failures.push(failure),
@@ -264,13 +259,7 @@ pub(crate) fn check_model(
         Err(failure) => failures.push(failure),
     }
 
-    let column_results = check_model_columns(
-        manifest,
-        original_model,
-        &mut working_model,
-        prior_changes,
-        config,
-    );
+    let column_results = check_model_columns(manifest, &mut working_model, prior_changes, config);
 
     let mut column_changes: BTreeMap<String, BTreeSet<ColumnChange>> = BTreeMap::new();
     for (column_name, column_result) in &column_results {
@@ -433,20 +422,14 @@ fn direct_join_to_source(model: &ManifestModel, config: &Config) -> Result<(), M
 // or at the very least add the columns
 // https://github.com/VDFaller/dbt-lint-yaml/issues/40
 fn missing_properties_file(
-    node: &DbtNode,
+    model: &mut ManifestModel,
     config: &Config,
 ) -> Result<Option<ModelChange>, ModelFailure> {
     if !config.is_selected(Selector::MissingPropertiesFile) {
         return Ok(None);
     }
 
-    let missing_patch = match node {
-        DbtNode::Model(model) => model.__common_attr__.patch_path.is_none(),
-        DbtNode::Seed(seed) => seed.__common_attr__.patch_path.is_none(),
-        DbtNode::Snapshot(snap) => snap.__common_attr__.patch_path.is_none(),
-        _ => false,
-    };
-    if !missing_patch {
+    if model.__common_attr__.patch_path.is_some() {
         return Ok(None);
     }
 
@@ -454,24 +437,21 @@ fn missing_properties_file(
     // return a ModelChange describing the change (so callers can record it and
     // apply the patch_path to their working model clone).
     if config.is_fixable(Selector::MissingPropertiesFile) {
-        match node {
-            DbtNode::Model(model) => {
-                match write_generated_model(model, config.project_dir.as_deref()) {
-                    Ok(generated_patch) => {
-                        // If we successfully wrote the generated model, we can return the change.
-                        return Ok(Some(ModelChange::GeneratePropertiesFile {
-                            model_id: model.__common_attr__.unique_id.clone(),
-                            model_name: model.__common_attr__.name.clone(),
-                            patch_path: Some(generated_patch),
-                        }));
-                    }
-                    Err(e) => {
-                        eprintln!("failed to write generated model properties: {e}");
-                        return Err(ModelFailure::MissingPropertiesFile);
-                    }
-                }
+        match write_generated_model(model, config.project_dir.as_deref()) {
+            Ok(generated_patch) => {
+                // If we successfully wrote the generated model, we can return the change.
+                model.__common_attr__.patch_path = Some(generated_patch.clone());
+
+                return Ok(Some(ModelChange::GeneratePropertiesFile {
+                    model_id: model.__common_attr__.unique_id.clone(),
+                    model_name: model.__common_attr__.name.clone(),
+                    patch_path: Some(generated_patch),
+                }));
             }
-            _ => { /* Not matching seeds or snapshots yet */ }
+            Err(e) => {
+                eprintln!("failed to write generated model properties: {e}");
+                return Err(ModelFailure::MissingPropertiesFile);
+            }
         }
     }
     Err(ModelFailure::MissingPropertiesFile)
@@ -1208,9 +1188,8 @@ mod tests {
     fn test_missing_properties_file_for_model() {
         let mut model = ManifestModel::default();
         model.__common_attr__.patch_path = None;
-        let node = DbtNode::Model(model);
         // default config has fix disabled, so a missing properties file should be reported
-        assert!(missing_properties_file(&node, &Config::default()).is_err());
+        assert!(missing_properties_file(&mut model, &Config::default()).is_err());
     }
 
     #[test]

@@ -7,16 +7,30 @@ use std::path::{Path, PathBuf};
 // Note: we avoid relying on specific ColumnChunkMetaData accessor names here so the example
 // stays compatible with the pinned parquet crate version; we print debug representations
 // of column-chunk metadata and prefer file-level and schema-level metadata for descriptions.
+use dbt_schemas::schemas::dbt_column::{DbtColumn, DbtColumnRef};
 use dbt_schemas::schemas::manifest::ManifestModel;
 
 use crate::writeback::properties::{ColumnProperty, ModelProperty, PropertyFile};
 
 fn generate_model(
-    model: &ManifestModel,
+    model: &mut ManifestModel,
     project_root: Option<&Path>,
 ) -> Result<PropertyFile, Box<dyn std::error::Error>> {
     let parquet_path = get_cached_parquet_path(model, project_root);
     let columns = get_columns_from_parquet(&parquet_path)?;
+    // we need to update the manifest model's columns to match what we found in parquet
+    // otherwise downstream checks will think the columns are missing
+    for col_prop in &columns {
+        let column = create_column_from_property(col_prop);
+        if !model
+            .__base_attr__
+            .columns
+            .iter()
+            .any(|c| c.name == column.name)
+        {
+            model.__base_attr__.columns.push(column);
+        }
+    }
 
     let model_doc = ModelProperty {
         name: Some(model.__common_attr__.name.clone()),
@@ -75,7 +89,7 @@ fn get_columns_from_parquet(
 }
 
 pub fn write_generated_model(
-    model: &ManifestModel,
+    model: &mut ManifestModel,
     project_root: Option<&Path>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let models_root = generate_model(model, project_root)?;
@@ -95,4 +109,12 @@ pub fn write_generated_model(
     }
     std::fs::write(resolved, yaml_str)?;
     Ok(get_write_path(model))
+}
+
+fn create_column_from_property(column_property: &ColumnProperty) -> DbtColumnRef {
+    std::sync::Arc::new(DbtColumn {
+        name: column_property.name.clone(),
+        description: None,
+        ..Default::default()
+    })
 }

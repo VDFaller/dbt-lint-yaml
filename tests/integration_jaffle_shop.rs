@@ -141,3 +141,67 @@ fn test_model_properties_layout_rebase() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+// This test verifies that when a properties file is missing,
+// we're able to get upstream column descriptions through osmosis
+#[test]
+#[ignore = "Codegen won't work until compile is SA'd."]
+fn test_missing_properties_file_populates_column_descriptions_from_osmosis()
+-> Result<(), Box<dyn Error>> {
+    let toml_override = r#"
+    select = ["missing_properties_file", "missing_column_descriptions"]
+    "#;
+    let temp = setup_jaffle_shop_fixture(Some(toml_override))?;
+
+    let locations_yml = temp
+        .path()
+        .join("tests/jaffle_shop/models/marts/locations.yml");
+    assert!(
+        !locations_yml.exists(),
+        "fixture unexpectedly contains locations.yml"
+    );
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
+    cmd.arg("parse")
+        .arg("--fix")
+        .arg("--project-dir")
+        .arg(temp.path().join("tests/jaffle_shop"));
+    let output = cmd.output()?;
+
+    if !locations_yml.exists() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        panic!(
+            "locations.yml was not created by writeback\n--- child stdout ---\n{}\n--- child stderr ---\n{}\n",
+            stdout, stderr
+        );
+    }
+
+    let contents = fs::read_to_string(&locations_yml)?;
+    let properties: PropertyFile = dbt_serde_yaml::from_str(&contents)?;
+
+    let models = properties.models.expect("no models found in locations.yml");
+    assert!(!models.is_empty(), "models list in locations.yml is empty");
+    let model = &models[0];
+
+    // The actual bug, is that the model has no columns because the ManifestModel
+    // wasn't updated after osmosis ran.
+    let location_col = model
+        .columns
+        .iter()
+        .find(|c| c.name.as_str() == "location_id")
+        .expect("location_id column not found in generated properties file");
+    if location_col.description.is_none() {
+        panic!(
+            "missing description for location_id\n--- produced file contents ---\n{}\n",
+            contents
+        );
+    }
+    assert_eq!(
+        location_col.description.as_ref().unwrap(),
+        "The unique key for each location.", // from stg_locations.location_id
+        "location_id description mismatch"
+    );
+
+    Ok(())
+}
