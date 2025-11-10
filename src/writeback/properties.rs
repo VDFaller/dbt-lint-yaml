@@ -91,16 +91,29 @@ pub fn model_property_from_manifest_differences(
         original_columns_map.insert(col.name.clone(), col);
     }
 
+    // helper to avoid duplicating the push logic for columns
+    fn push_updated_col(
+        model_prop: &mut ModelProperty,
+        updated_col: &DbtColumnRef,
+        has_change: &mut bool,
+    ) {
+        *has_change = true;
+        model_prop.columns.push(ColumnProperty {
+            name: updated_col.name.clone(),
+            description: updated_col.description.clone(),
+            extras: BTreeMap::new(),
+        });
+    }
+
     for updated_col in &updated.__base_attr__.columns {
-        if let Some(orig_col) = original_columns_map.get(&updated_col.name)
-            && orig_col.description != updated_col.description
-        {
-            has_change = true;
-            model_prop.columns.push(ColumnProperty {
-                name: updated_col.name.clone(),
-                description: updated_col.description.clone(),
-                extras: BTreeMap::new(),
-            });
+        if let Some(orig_col) = original_columns_map.get(&updated_col.name) {
+            // column existed before, include if description changed
+            if orig_col.description != updated_col.description {
+                push_updated_col(&mut model_prop, updated_col, &mut has_change);
+            }
+        } else {
+            // newly added column — include it
+            push_updated_col(&mut model_prop, updated_col, &mut has_change);
         }
     }
     // I don't think this catches everything yet, but it's a start
