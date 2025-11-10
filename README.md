@@ -33,12 +33,12 @@ pip install ruamel.yaml
 ```
 
 ## Usage
-For now we're piggy-backing on [dbt-sa-cli](https://github.com/dbt-labs/dbt-sa-cli) for command-line interface functionality. So you still have to pass a parse argument.
+For now we're piggy-backing on [dbt-sa-cli](https://github.com/dbt-labs/dbt-sa-cli) for command-line interface functionality.
 
 ``` bash
-dbt-lint-yaml parse
+dbt-lint-yaml
 # or if you want auto fixes
-dbt-lint-yaml parse --fix
+dbt-lint-yaml --fix
 ```
 
 The rules are controlled by a `dbt-lint.yml` file in the root of your dbt project. 

@@ -59,6 +59,10 @@ fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, bool, bool) {
             fix = true;
             continue;
         }
+        if arg == "parse" {
+            // skip parse so it's backwards compatible with prior CLI
+            continue;
+        }
         filtered.push(arg);
     }
 
@@ -120,7 +124,8 @@ async fn main() -> FsResult<()> {
     maybe_handle_version_override();
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
-    let (filtered_args, verbose, fix_flag) = extract_shimmed_flags(raw_args);
+    let (mut filtered_args, verbose, fix_flag) = extract_shimmed_flags(raw_args);
+    filtered_args.insert(1, OsString::from("parse"));
 
     let project = load_project_from_cli_args(filtered_args).await?;
 
