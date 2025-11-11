@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use crate::config::ModelPropertiesLayout;
 use crate::writeback::properties::{ModelProperty, SourceProperty};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,13 +36,6 @@ pub enum ModelChange {
         model_name: String,
         patch_path: Option<PathBuf>,
         property: Option<ModelProperty>,
-    },
-    NormalizePropertiesLayout {
-        model_id: String,
-        model_name: String,
-        current_patch: Option<PathBuf>,
-        expected_patch: PathBuf,
-        layout: ModelPropertiesLayout,
     },
 }
 
