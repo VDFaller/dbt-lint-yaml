@@ -29,7 +29,7 @@ pub fn group_changes_by_file(
         if let Some(patch_path) = &model_changes.patch_path {
             file_groups
                 .entry(patch_path.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(model_changes);
         }
     }
@@ -48,18 +48,23 @@ mod tests {
         let path1 = PathBuf::from("models/models.yml");
         let path2 = PathBuf::from("models/staging/staging_models.yml");
 
-        let mut model1 = ModelChanges::default();
-        model1.model_id = "model.test.model1".to_string();
-        model1.patch_path = Some(path1.clone());
+        let model1 = ModelChanges {
+            model_id: "model.test.model1".to_string(),
+            patch_path: Some(path1.clone()),
+            ..Default::default()
+        };
 
-        let mut model2 = ModelChanges::default();
-        model2.model_id = "model.test.model2".to_string();
-        model2.patch_path = Some(path1.clone());
+        let model2 = ModelChanges {
+            model_id: "model.test.model2".to_string(),
+            patch_path: Some(path1.clone()),
+            ..Default::default()
+        };
 
-        let mut model3 = ModelChanges::default();
-        model3.model_id = "model.test.model3".to_string();
-        model3.patch_path = Some(path2.clone());
-
+        let model3 = ModelChanges {
+            model_id: "model.test.model3".to_string(),
+            patch_path: Some(path2.clone()),
+            ..Default::default()
+        };
         changes.insert("model.test.model1".to_string(), model1);
         changes.insert("model.test.model2".to_string(), model2);
         changes.insert("model.test.model3".to_string(), model3);

@@ -184,7 +184,7 @@ pub fn apply_with_python(
                                 LayoutRequest::new(
                                     &resolved_current,
                                     &resolved_expected,
-                                    &model_name,
+                                    model_name,
                                     *layout,
                                 ),
                             )?;
@@ -237,30 +237,30 @@ pub fn apply_with_python(
         }
 
         // Single batch call to Python for all models in this file
-        if let Some(patch_path) = resolved_path {
-            if !batch_updates.is_empty() {
-                let model_updates: Vec<ModelUpdate> = batch_updates
-                    .iter()
-                    .map(|(_, update)| update.clone())
-                    .collect();
+        if let Some(patch_path) = resolved_path
+            && !batch_updates.is_empty()
+        {
+            let model_updates: Vec<ModelUpdate> = batch_updates
+                .iter()
+                .map(|(_, update)| update.clone())
+                .collect();
 
-                let request = PythonBatchRequest {
-                    patch_path,
-                    models: model_updates,
-                };
+            let request = PythonBatchRequest {
+                patch_path,
+                models: model_updates,
+            };
 
-                let response = invoke_python_batch_helper(&helper_path, &request)?;
+            let response = invoke_python_batch_helper(&helper_path, &request)?;
 
-                // Map responses back to model IDs
-                for (model_id, _) in batch_updates {
-                    let model_name = extract_model_name(&model_id).to_string();
-                    let updated_cols = response
-                        .results
-                        .get(&model_name)
-                        .cloned()
-                        .unwrap_or_default();
-                    results.push((model_id, updated_cols));
-                }
+            // Map responses back to model IDs
+            for (model_id, _) in batch_updates {
+                let model_name = extract_model_name(&model_id).to_string();
+                let updated_cols = response
+                    .results
+                    .get(&model_name)
+                    .cloned()
+                    .unwrap_or_default();
+                results.push((model_id, updated_cols));
             }
         }
     }
