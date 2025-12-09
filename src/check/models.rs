@@ -491,12 +491,11 @@ fn check_properties_layout(
     let model_name = working_model.__common_attr__.name.clone();
     working_model.__common_attr__.patch_path = expected_patch.clone();
 
-    let change = ModelChange::NormalizePropertiesLayout {
+    let change = ModelChange::MovePropertiesFile {
         model_id,
         model_name,
-        current_patch: actual_patch,
-        expected_patch: expected_patch.unwrap(),
-        layout: config.model_properties_layout,
+        patch_path: actual_patch,
+        new_path: expected_patch.unwrap(),
     };
     Ok(Some(change))
 }
@@ -852,25 +851,23 @@ mod tests {
             .expect("layout fix is considered")
             .expect("layout mismatch should produce change");
 
-        if let ModelChange::NormalizePropertiesLayout {
+        if let ModelChange::MovePropertiesFile {
             model_id,
             model_name,
-            current_patch,
-            expected_patch,
-            layout,
+            patch_path,
+            new_path,
         } = change
         {
             assert_eq!(model_id, original.__common_attr__.unique_id);
             assert_eq!(model_name, original.__common_attr__.name);
             assert_eq!(
-                current_patch,
+                patch_path,
                 Some(PathBuf::from("models/staging/stg_customers.yml"))
             );
             assert_eq!(
-                expected_patch,
+                new_path,
                 PathBuf::from("models/staging/_staging__models.yml")
             );
-            assert_eq!(layout, ModelPropertiesLayout::PerDirectory);
         } else {
             panic!("expected normalize layout change");
         }
@@ -898,25 +895,20 @@ mod tests {
             .expect("layout fix considered")
             .expect("layout mismatch should be reported");
 
-        if let ModelChange::NormalizePropertiesLayout {
+        if let ModelChange::MovePropertiesFile {
             model_id,
             model_name,
-            current_patch,
-            expected_patch,
-            layout,
+            patch_path,
+            new_path,
         } = change
         {
             assert_eq!(model_id, original.__common_attr__.unique_id);
             assert_eq!(model_name, original.__common_attr__.name);
             assert_eq!(
-                current_patch,
+                patch_path,
                 Some(PathBuf::from("models/staging/_staging__models.yml"))
             );
-            assert_eq!(
-                expected_patch,
-                PathBuf::from("models/staging/stg_customers.yml")
-            );
-            assert_eq!(layout, ModelPropertiesLayout::PerModel);
+            assert_eq!(new_path, PathBuf::from("models/staging/stg_customers.yml"));
         } else {
             panic!("expected normalize layout change");
         }

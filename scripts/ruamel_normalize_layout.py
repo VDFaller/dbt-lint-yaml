@@ -130,30 +130,6 @@ def normalize_to_directory(
     return True
 
 
-def normalize_to_model(
-    yaml: YAML,
-    current_path: Path,
-    expected_path: Path,
-    model_name: str,
-) -> bool:
-    if not current_path.exists():
-        raise LayoutError(f"YAML file `{current_path}` not found")
-
-    if current_path == expected_path:
-        return False
-
-    source_doc = load_document(current_path, yaml)
-    model = remove_model(source_doc, model_name, current_path)
-
-    target_doc = load_document(expected_path, yaml)
-    target_doc["models"] = CommentedSeq([model])
-    target_doc.pop("sources", None)
-
-    write_or_remove(current_path, yaml, source_doc)
-    write_or_remove(expected_path, yaml, target_doc)
-    return True
-
-
 def main() -> int:
     try:
         payload = load_request()
@@ -162,14 +138,8 @@ def main() -> int:
         current_path = Path(payload["current_patch"])
         expected_path = Path(payload["expected_patch"])
         model_name = payload["model_name"]
-        layout = payload["layout"]
 
-        if layout == "per_directory":
-            mutated = normalize_to_directory(yaml, current_path, expected_path, model_name)
-        elif layout == "per_model":
-            mutated = normalize_to_model(yaml, current_path, expected_path, model_name)
-        else:  # pragma: no cover - caller contract violation
-            raise LayoutError(f"Unsupported layout `{layout}`")
+        mutated = normalize_to_directory(yaml, current_path, expected_path, model_name)
 
     except LayoutError as exc:
         print(str(exc), file=sys.stderr)

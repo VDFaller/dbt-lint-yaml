@@ -1,7 +1,8 @@
 use super::WriteBackError;
 use crate::change_descriptors::ModelChange;
 use crate::check::ModelChanges;
-use crate::writeback::properties::{ColumnProperty, ModelProperty, PropertyFile};
+use crate::writeback::changes::group_changes_by_file;
+use crate::writeback::properties::{ModelProperty, PropertyFile};
 use dbt_serde_yaml;
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,162 +18,135 @@ pub fn apply_with_rust(
 
     let mut results = Vec::new();
 
-    for model_changes in changes.values() {
-        let patch_path =
-            model_changes
-                .patch_path
-                .as_ref()
-                .ok_or_else(|| WriteBackError::PatchPathMissing {
-                    model_id: model_changes.model_id.clone(),
-                })?;
+    // Group changes by file for efficient batching: one read/write per file instead of per model
+    let grouped_changes = group_changes_by_file(changes);
 
+    for (patch_path, models_for_file) in grouped_changes {
         let mut resolved_path = if patch_path.is_absolute() {
             patch_path.clone()
         } else {
-            project_root.join(patch_path)
+            project_root.join(&patch_path)
         };
 
+        // Single read per file
         let mut docs = read_property_file(&resolved_path)?;
-
-        let mut updated_columns = Vec::new();
         let mut file_mutated = false;
 
-        let mut reported_columns: Vec<String> = Vec::new();
-        for change in &model_changes.changes {
-            if let ModelChange::ChangePropertiesFile {
-                property: Some(prop),
-                ..
-            } = change
-            {
-                reported_columns.extend(prop.columns.iter().map(|col| col.name.clone()));
+        // Apply all changes for this file
+        for model_changes in models_for_file {
+            let mut updated_columns = Vec::new();
+            let mut reported_columns: Vec<String> = Vec::new();
+
+            for change in &model_changes.changes {
+                if let ModelChange::ChangePropertiesFile {
+                    property: Some(prop),
+                    ..
+                } = change
+                {
+                    reported_columns.extend(prop.columns.iter().map(|col| col.name.clone()));
+                }
             }
-        }
 
-        // Execute each change in sequence, applying filesystem and in-memory effects.
-        for change in &model_changes.changes {
-            match change {
-                ModelChange::MovePropertiesFile {
-                    patch_path,
-                    new_path,
-                    ..
-                } => {
-                    let patch =
-                        patch_path
-                            .clone()
-                            .ok_or_else(|| WriteBackError::PatchPathMissing {
-                                model_id: model_changes.model_id.clone(),
-                            })?;
-                    let src = if patch.is_absolute() {
-                        patch
-                    } else {
-                        project_root.join(patch)
-                    };
-                    let dst = if new_path.is_absolute() {
-                        new_path.clone()
-                    } else {
-                        project_root.join(new_path)
-                    };
-                    if let Some(parent) = dst.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::rename(&src, &dst)?;
-                    resolved_path = dst;
-                }
-                ModelChange::ChangePropertiesFile {
-                    model_name,
-                    property,
-                    ..
-                } => {
-                    let Some(prop) = property else {
-                        continue;
-                    };
+            // Execute each change in sequence, applying filesystem and in-memory effects.
+            for change in &model_changes.changes {
+                match change {
+                    ModelChange::MovePropertiesFile {
+                        model_id,
+                        model_name,
+                        patch_path,
+                        new_path,
+                    } => {
+                        let expected_path = if new_path.is_absolute() {
+                            new_path.clone()
+                        } else {
+                            project_root.join(new_path)
+                        };
 
-                    if let Some(existing) = docs.find_model_mut(model_name) {
-                        existing.merge(prop);
-                    } else {
-                        let mut new_prop = prop.clone();
-                        if new_prop.name.is_none() {
-                            new_prop.name = Some(model_name.clone());
-                        }
-                        docs.models.get_or_insert_with(Vec::new).push(new_prop);
-                    }
-
-                    file_mutated = true;
-                    updated_columns.push(format!("@model:{}", model_name));
-                }
-                ModelChange::GeneratePropertiesFile { .. } => {
-                    // The check phase already wrote the properties file; nothing to do.
-                }
-                ModelChange::NormalizePropertiesLayout {
-                    model_id,
-                    model_name,
-                    current_patch,
-                    expected_patch,
-                    layout,
-                } => {
-                    let expected_path = if expected_patch.is_absolute() {
-                        expected_patch.clone()
-                    } else {
-                        project_root.join(expected_patch)
-                    };
-
-                    let mutated = match layout {
-                        crate::config::ModelPropertiesLayout::PerDirectory => {
-                            normalize_to_directory(
-                                &mut docs,
-                                project_root,
-                                model_id,
-                                model_name,
-                                current_patch,
-                                expected_patch,
-                            )?
-                        }
-                        crate::config::ModelPropertiesLayout::PerModel => normalize_to_model(
+                        let mutated = move_model_property(
                             &mut docs,
                             project_root,
                             model_id,
                             model_name,
-                            current_patch,
-                            expected_patch,
-                        )?,
-                    };
+                            patch_path,
+                            new_path,
+                        )?;
 
-                    resolved_path = expected_path;
-                    if mutated {
+                        resolved_path = expected_path;
+                        if mutated {
+                            file_mutated = true;
+                            updated_columns.push(format!("@model:{}", model_name));
+                        }
+                    }
+                    ModelChange::ChangePropertiesFile {
+                        model_name,
+                        property,
+                        ..
+                    } => {
+                        let Some(prop) = property else {
+                            continue;
+                        };
+
+                        if let Some(existing) = docs.find_model_mut(model_name) {
+                            existing.merge(prop);
+                        } else {
+                            let mut new_prop = prop.clone();
+                            if new_prop.name.is_none() {
+                                new_prop.name = Some(model_name.clone());
+                            }
+                            docs.models.get_or_insert_with(Vec::new).push(new_prop);
+                        }
+
                         file_mutated = true;
                         updated_columns.push(format!("@model:{}", model_name));
                     }
-                }
-                ModelChange::MoveModelFile {
-                    patch_path,
-                    new_path,
-                    ..
-                } => {
-                    let patch =
-                        patch_path
-                            .clone()
-                            .ok_or_else(|| WriteBackError::PatchPathMissing {
-                                model_id: model_changes.model_id.clone(),
-                            })?;
-                    let src = if patch.is_absolute() {
-                        patch
-                    } else {
-                        project_root.join(patch)
-                    };
-                    let dst = if new_path.is_absolute() {
-                        new_path.clone()
-                    } else {
-                        project_root.join(new_path)
-                    };
-                    if let Some(parent) = dst.parent() {
-                        std::fs::create_dir_all(parent)?;
+                    ModelChange::GeneratePropertiesFile { .. } => {
+                        // The check phase already wrote the properties file; nothing to do.
                     }
-                    std::fs::rename(&src, &dst)?;
+                    ModelChange::MoveModelFile {
+                        patch_path,
+                        new_path,
+                        ..
+                    } => {
+                        let patch =
+                            patch_path
+                                .clone()
+                                .ok_or_else(|| WriteBackError::PatchPathMissing {
+                                    model_id: model_changes.model_id.clone(),
+                                })?;
+                        let src = if patch.is_absolute() {
+                            patch
+                        } else {
+                            project_root.join(patch)
+                        };
+                        let dst = if new_path.is_absolute() {
+                            new_path.clone()
+                        } else {
+                            project_root.join(new_path)
+                        };
+                        if let Some(parent) = dst.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::rename(&src, &dst)?;
+                    }
                 }
+            }
+
+            // Report results for this model
+            if file_mutated {
+                // Filter out synthetic markers before reporting.
+                updated_columns.retain(|label| !label.starts_with("@model:"));
+                if updated_columns.is_empty() {
+                    updated_columns = reported_columns;
+                } else {
+                    updated_columns.extend(reported_columns);
+                }
+                results.push((model_changes.model_id.clone(), updated_columns));
+            } else if !model_changes.changes.is_empty() {
+                results.push((model_changes.model_id.clone(), Vec::new()));
             }
         }
 
-        // Persist YAML if we mutated in-memory docs
+        // Single write per file after all changes for this file are applied
         if file_mutated {
             if property_file_is_empty(&docs) {
                 if resolved_path.exists() {
@@ -186,25 +160,12 @@ pub fn apply_with_rust(
                 std::fs::write(&resolved_path, out_str)?;
             }
         }
-
-        if file_mutated {
-            // Filter out synthetic markers before reporting.
-            updated_columns.retain(|label| !label.starts_with("@model:"));
-            if updated_columns.is_empty() {
-                updated_columns = reported_columns;
-            } else {
-                updated_columns.extend(reported_columns);
-            }
-            results.push((model_changes.model_id.clone(), updated_columns));
-        } else if !model_changes.changes.is_empty() {
-            results.push((model_changes.model_id.clone(), Vec::new()));
-        }
     }
 
     Ok(results)
 }
 
-fn normalize_to_directory(
+fn move_model_property(
     target_root: &mut PropertyFile,
     project_root: &Path,
     model_id: &str,
@@ -228,37 +189,6 @@ fn normalize_to_directory(
     let property = extract_model_property(model_id, model_name, &mut source_doc)?;
 
     upsert_model_property(target_root, property);
-
-    write_or_remove_property_file(&current_path, &source_doc)?;
-
-    Ok(true)
-}
-
-fn normalize_to_model(
-    target_root: &mut PropertyFile,
-    project_root: &Path,
-    model_id: &str,
-    model_name: &str,
-    current_patch: &Option<PathBuf>,
-    expected_patch: &PathBuf,
-) -> Result<bool, WriteBackError> {
-    let current = current_patch
-        .clone()
-        .ok_or_else(|| WriteBackError::PatchPathMissing {
-            model_id: model_id.to_string(),
-        })?;
-
-    if &current == expected_patch {
-        return Ok(false);
-    }
-
-    let current_path = resolve_patch_path(project_root, &current);
-
-    let mut source_doc = read_property_file(&current_path)?;
-    let property = extract_model_property(model_id, model_name, &mut source_doc)?;
-
-    target_root.models = Some(vec![property]);
-    target_root.sources = None;
 
     write_or_remove_property_file(&current_path, &source_doc)?;
 
@@ -340,34 +270,9 @@ fn upsert_model_property(doc: &mut PropertyFile, property: ModelProperty) {
         .iter_mut()
         .find(|model| model.name.as_deref() == property.name.as_deref())
     {
-        merge_model_property(existing, &property);
+        existing.merge(&property);
     } else {
         models.push(property);
-    }
-}
-
-fn merge_model_property(target: &mut ModelProperty, source: &ModelProperty) {
-    if target.description.is_none() {
-        target.description = source.description.clone();
-    }
-
-    let mut lookup: BTreeMap<String, &ColumnProperty> = BTreeMap::new();
-    for column in &source.columns {
-        lookup.insert(column.name.clone(), column);
-    }
-
-    for column in &mut target.columns {
-        if let Some(other) = lookup.get(&column.name)
-            && other.description.is_some()
-        {
-            column.description = other.description.clone();
-        }
-    }
-
-    for column in source.columns.iter() {
-        if !target.columns.iter().any(|c| c.name == column.name) {
-            target.columns.push(column.clone());
-        }
     }
 }
 
