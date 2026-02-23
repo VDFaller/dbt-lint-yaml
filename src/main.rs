@@ -142,12 +142,12 @@ async fn main() -> FsResult<()> {
     });
 
     for (model, model_changes) in check_result.model_changes.iter() {
-        println!("Model: {model} has found changes");
+        eprintln!("Model: {model} has found changes");
         for (column, column_changes) in model_changes.column_changes.iter() {
             for change in column_changes {
                 match change {
                     ColumnChange::ChangePropertiesFile => {
-                        println!("  Column: {column} - properties file will be regenerated");
+                        eprintln!("  Column: {column} - properties file will be regenerated");
                     }
                 }
             }
@@ -168,7 +168,7 @@ async fn main() -> FsResult<()> {
                         if columns.is_empty() {
                             continue;
                         }
-                        println!("Applied ruamel.yaml updates for {model_id}: {columns:?}");
+                        println!("Applied changes for {model_id}: {}", columns.join(", "));
                     }
                 }
                 Err(err) => {
