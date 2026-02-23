@@ -11,6 +11,26 @@ use std::ffi::OsString;
 const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+struct CliOptions {
+    verbose: bool,
+    color: bool,
+    fix: bool,
+}
+
+/// Returns false if the NO_COLOR env var is set or `no_color_flag` was passed.
+fn use_color(no_color_flag: bool) -> bool {
+    !no_color_flag && std::env::var_os("NO_COLOR").is_none()
+}
+
+/// Wraps `text` in the given ANSI SGR code when color is enabled.
+fn colored(text: &str, code: &str, enabled: bool) -> String {
+    if enabled {
+        format!("\x1b[{code}m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
 fn maybe_handle_version_override() {
     use std::ffi::OsStr;
 
@@ -30,8 +50,9 @@ fn maybe_handle_version_override() {
     }
 }
 
-fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, bool, bool) {
+fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, CliOptions) {
     let mut verbose = false;
+    let mut no_color = false;
     let mut fix = false;
     let mut filtered = Vec::new();
     let mut iter = args.into_iter();
@@ -55,6 +76,10 @@ fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, bool, bool) {
             verbose = true;
             continue;
         }
+        if arg == "--no-color" {
+            no_color = true;
+            continue;
+        }
         if arg == "--fix" {
             fix = true;
             continue;
@@ -66,18 +91,31 @@ fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, bool, bool) {
         filtered.push(arg);
     }
 
-    (filtered, verbose, fix)
+    let opts = CliOptions {
+        verbose,
+        fix,
+        color: use_color(no_color),
+    };
+    (filtered, opts)
 }
 
-fn report_event(event: CheckEvent<'_>, verbose: bool) {
+fn report_event(event: CheckEvent<'_>, opts: &CliOptions) {
     match event {
         CheckEvent::Model(model_result) => {
             if model_result.is_pass() {
-                if verbose {
-                    println!("\x1b[32msuccess:\x1b[0m {} passed", model_result.model_id());
+                if opts.verbose {
+                    println!(
+                        "{} {} passed",
+                        colored("success:", "32", opts.color),
+                        model_result.model_id()
+                    );
                 }
             } else {
-                println!("\x1b[31merror:\x1b[0m {} failed", model_result.model_id());
+                println!(
+                    "{} {} failed",
+                    colored("error:", "31", opts.color),
+                    model_result.model_id()
+                );
                 for reason in model_result.failure_reasons() {
                     println!("    * {reason}");
                 }
@@ -85,14 +123,19 @@ fn report_event(event: CheckEvent<'_>, verbose: bool) {
         }
         CheckEvent::Source(source_result) => {
             if source_result.is_pass() {
-                if verbose {
+                if opts.verbose {
                     println!(
-                        "\x1b[32msuccess:\x1b[0m {} passed",
+                        "{} {} passed",
+                        colored("success:", "32", opts.color),
                         source_result.source_id()
                     );
                 }
             } else {
-                println!("\x1b[31merror:\x1b[0m {} failed", source_result.source_id());
+                println!(
+                    "{} {} failed",
+                    colored("error:", "31", opts.color),
+                    source_result.source_id()
+                );
                 for reason in source_result.failure_reasons() {
                     println!("    * {reason}");
                 }
@@ -100,15 +143,17 @@ fn report_event(event: CheckEvent<'_>, verbose: bool) {
         }
         CheckEvent::Exposure(exposure_result) => {
             if exposure_result.failures.is_empty() {
-                if verbose {
+                if opts.verbose {
                     println!(
-                        "\x1b[32msuccess:\x1b[0m {} passed",
+                        "{} {} passed",
+                        colored("success:", "32", opts.color),
                         exposure_result.exposure_id
                     );
                 }
             } else {
                 println!(
-                    "\x1b[31merror:\x1b[0m {} failed",
+                    "{} {} failed",
+                    colored("error:", "31", opts.color),
                     exposure_result.exposure_id
                 );
                 for reason in &exposure_result.failures {
@@ -124,21 +169,21 @@ async fn main() -> FsResult<()> {
     maybe_handle_version_override();
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
-    let (mut filtered_args, verbose, fix_flag) = extract_shimmed_flags(raw_args);
+    let (mut filtered_args, opts) = extract_shimmed_flags(raw_args);
     filtered_args.insert(1, OsString::from("parse"));
 
     let project = load_project_from_cli_args(filtered_args).await?;
 
     // where I come in
     let config = match ConfigFile::resolve(&project.invocation_args) {
-        Ok(cfg) => cfg.with_fix(fix_flag),
+        Ok(cfg) => cfg.with_fix(opts.fix),
         Err(err) => {
             eprintln!("Failed to load configuration: {err}");
             std::process::exit(2);
         }
     };
     let check_result = check_all_with_report(&project.manifest, &config, |event| {
-        report_event(event, verbose);
+        report_event(event, &opts);
     });
 
     for (model, model_changes) in check_result.model_changes.iter() {
@@ -183,7 +228,7 @@ async fn main() -> FsResult<()> {
     if check_result.has_failures() {
         std::process::exit(1);
     }
-    println!("\x1b[32mAll checks passed\x1b[0m");
+    println!("{}", colored("All checks passed", "32", opts.color));
 
     Ok(())
 }
