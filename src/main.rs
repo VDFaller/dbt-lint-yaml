@@ -1,7 +1,7 @@
 use dbt_common::FsResult;
 use dbt_lint_yaml::{
     change_descriptors::ColumnChange,
-    check::{CheckEvent, check_all_with_report},
+    check::{CheckEvent, CheckResult, check_all_with_report},
     config::ConfigFile,
     project::load_project_from_cli_args,
     writeback,
@@ -164,6 +164,39 @@ fn report_event(event: CheckEvent<'_>, opts: &CliOptions) {
     }
 }
 
+fn print_summary(check_result: &CheckResult, opts: &CliOptions) {
+    let total =
+        check_result.models.len() + check_result.sources.len() + check_result.exposures.len();
+    let failed = check_result
+        .models
+        .values()
+        .filter(|r| r.is_failure())
+        .count()
+        + check_result
+            .sources
+            .values()
+            .filter(|r| r.is_failure())
+            .count()
+        + check_result
+            .exposures
+            .values()
+            .filter(|r| !r.failures.is_empty())
+            .count();
+    let passed = total - failed;
+
+    if failed > 0 {
+        println!(
+            "{} {passed} passed, {failed} failed",
+            colored("Summary:", "33", opts.color),
+        );
+    } else {
+        println!(
+            "{} {total} checks passed",
+            colored("All checks passed!", "32", opts.color),
+        );
+    }
+}
+
 #[tokio::main]
 async fn main() -> FsResult<()> {
     maybe_handle_version_override();
@@ -225,10 +258,12 @@ async fn main() -> FsResult<()> {
         println!("Fixes available; re-run with --fix to apply them.");
     }
 
-    if check_result.has_failures() {
+    let has_failures = check_result.has_failures();
+    print_summary(&check_result, &opts);
+
+    if has_failures {
         std::process::exit(1);
     }
-    println!("{}", colored("All checks passed", "32", opts.color));
 
     Ok(())
 }
