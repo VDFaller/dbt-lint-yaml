@@ -32,7 +32,7 @@ fn colored(text: &str, code: &str, enabled: bool) -> String {
     }
 }
 
-fn maybe_handle_version_override() {
+fn maybe_handle_meta_flags() {
     use std::ffi::OsStr;
 
     let mut args = std::env::args_os();
@@ -46,6 +46,31 @@ fn maybe_handle_version_override() {
 
         if arg == OsStr::new("--version") || arg == OsStr::new("-V") {
             println!("{PKG_NAME} {PKG_VERSION}");
+            std::process::exit(0);
+        }
+
+        if arg == OsStr::new("--help") || arg == OsStr::new("-h") {
+            println!(
+                "{PKG_NAME} {PKG_VERSION}
+A linter for dbt project YAML files.
+
+USAGE:
+    {PKG_NAME} [OPTIONS] [dbt-fusion args...]
+
+OPTIONS:
+    --fix          Apply auto-fixable changes
+    -v, --verbose  Show passing checks in addition to failures
+    -q, --quiet    Suppress per-check output; show only the summary
+        --no-color Disable colored output (also honours the NO_COLOR env var)
+    -V, --version  Print version and exit
+    -h, --help     Print this help
+
+CONFIGURATION:
+    Place a dbt-lint.toml in your dbt project root to configure rules and
+    thresholds. Run `write-default-config` to generate a starter config.
+
+All other flags are forwarded to dbt-fusion for project loading."
+            );
             std::process::exit(0);
         }
     }
@@ -209,7 +234,7 @@ fn print_summary(check_result: &CheckResult, opts: &CliOptions) {
 
 #[tokio::main]
 async fn main() -> FsResult<()> {
-    maybe_handle_version_override();
+    maybe_handle_meta_flags();
 
     let raw_args: Vec<OsString> = std::env::args_os().collect();
     let (mut filtered_args, opts) = extract_shimmed_flags(raw_args);
