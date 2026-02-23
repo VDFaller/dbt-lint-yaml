@@ -13,6 +13,7 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct CliOptions {
     verbose: bool,
+    quiet: bool,
     color: bool,
     fix: bool,
 }
@@ -52,6 +53,7 @@ fn maybe_handle_version_override() {
 
 fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, CliOptions) {
     let mut verbose = false;
+    let mut quiet = false;
     let mut no_color = false;
     let mut fix = false;
     let mut filtered = Vec::new();
@@ -76,6 +78,10 @@ fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, CliOptions) {
             verbose = true;
             continue;
         }
+        if arg == "--quiet" || arg == "-q" {
+            quiet = true;
+            continue;
+        }
         if arg == "--no-color" {
             no_color = true;
             continue;
@@ -93,6 +99,7 @@ fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, CliOptions) {
 
     let opts = CliOptions {
         verbose,
+        quiet,
         fix,
         color: use_color(no_color),
     };
@@ -100,6 +107,9 @@ fn extract_shimmed_flags(args: Vec<OsString>) -> (Vec<OsString>, CliOptions) {
 }
 
 fn report_event(event: CheckEvent<'_>, opts: &CliOptions) {
+    if opts.quiet {
+        return;
+    }
     match event {
         CheckEvent::Model(model_result) => {
             if model_result.is_pass() {
