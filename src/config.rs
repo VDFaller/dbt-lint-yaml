@@ -336,7 +336,7 @@ fn default_intermediate_prefixes() -> Vec<String> {
 }
 
 fn default_mart_directory() -> String {
-    "mart".to_string()
+    "marts".to_string()
 }
 
 fn default_mart_prefixes() -> Vec<String> {
@@ -633,15 +633,15 @@ mod tests {
     fn model_type_mart_prefix() {
         let config = Config::default();
         assert_eq!(
-            ModelType::from_file_path(Path::new("models/mart/dim_customers.sql"), &config),
+            ModelType::from_file_path(Path::new("models/marts/dim_customers.sql"), &config),
             ModelType::Mart {
-                expected_dir: "mart".to_string()
+                expected_dir: "marts".to_string()
             }
         );
         assert_eq!(
-            ModelType::from_file_path(Path::new("models/mart/fct_orders.sql"), &config),
+            ModelType::from_file_path(Path::new("models/marts/fct_orders.sql"), &config),
             ModelType::Mart {
-                expected_dir: "mart".to_string()
+                expected_dir: "marts".to_string()
             }
         );
     }
@@ -664,9 +664,9 @@ mod tests {
 
         // stg_stripe_ in mart_prefixes is longer than stg_ in staging_prefixes
         assert_eq!(
-            ModelType::from_file_path(Path::new("models/mart/stg_stripe_orders.sql"), &config),
+            ModelType::from_file_path(Path::new("models/marts/stg_stripe_orders.sql"), &config),
             ModelType::Mart {
-                expected_dir: "mart".to_string()
+                expected_dir: "marts".to_string()
             }
         );
     }
