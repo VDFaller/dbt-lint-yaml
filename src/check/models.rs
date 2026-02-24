@@ -3,13 +3,13 @@ use crate::change_descriptors::{ColumnChange, ModelChange, ModelChanges};
 use crate::codegen::write_generated_model;
 use crate::{
     check::columns::check_model_columns,
-    config::{Config, ModelPropertiesLayout, Selector},
+    config::{Config, ModelPropertiesLayout, ModelType, Selector},
     writeback::properties::model_property_from_manifest_differences,
 };
 use dbt_schemas::schemas::manifest::{DbtManifestV12, DbtNode, ManifestModel};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use strum::AsRefStr;
 
@@ -44,6 +44,10 @@ pub enum ModelFailure {
         message: String,
     },
     ModelPropertiesProjectRootMissing,
+    WrongModelDirectory {
+        expected_dir: String,
+        actual_dir: String,
+    },
 }
 
 impl Display for ModelFailure {
@@ -100,6 +104,10 @@ impl Display for ModelFailure {
             ModelFailure::ModelPropertiesProjectRootMissing => {
                 " (project_dir not configured; cannot apply layout fix)".to_string()
             }
+            ModelFailure::WrongModelDirectory {
+                expected_dir,
+                actual_dir,
+            } => format!(" (expected: {expected_dir}, nearest recognized: {actual_dir})"),
             _ => String::new(),
         };
         write!(f, "{}{}", self.as_ref(), extra_info)
@@ -188,6 +196,12 @@ pub(crate) fn check_model(
     let mut failures: Vec<ModelFailure> = Vec::new();
     let mut model_level_changes: Vec<ModelChange> = Vec::new();
     let mut property_change_required = false;
+
+    match check_model_directories(&mut working_model, config) {
+        Ok(Some(changes)) => model_level_changes.extend(changes),
+        Ok(None) => {}
+        Err(failure) => failures.push(failure),
+    }
 
     match missing_properties_file(&mut working_model, config) {
         Ok(Some(_)) => {
@@ -707,6 +721,138 @@ fn missing_required_tests(
 
 // Column checking moved into `src/check/columns.rs`.
 
+fn check_model_directories(
+    model: &mut ManifestModel,
+    config: &Config,
+) -> Result<Option<Vec<ModelChange>>, ModelFailure> {
+    if !config.is_selected(Selector::ModelDirectories) {
+        return Ok(None);
+    }
+
+    let original_path = model.__common_attr__.original_file_path.clone();
+
+    let expected_dir = match ModelType::from_file_path(&original_path, config) {
+        ModelType::Unknown => return Ok(None),
+        ModelType::Staging { expected_dir }
+        | ModelType::Intermediate { expected_dir }
+        | ModelType::Mart { expected_dir } => expected_dir,
+    };
+
+    let nearest = nearest_recognized_dir(&original_path, config);
+    match &nearest {
+        Some(dir) if dir == &expected_dir => return Ok(None),
+        None => return Ok(None),
+        _ => {}
+    }
+
+    let failure = Err(ModelFailure::WrongModelDirectory {
+        expected_dir: expected_dir.clone(),
+        actual_dir: nearest.unwrap_or_default(),
+    });
+
+    if !config.is_fixable(Selector::ModelDirectories) {
+        return failure;
+    }
+
+    let Some(new_sql_path) = compute_fix_path(&original_path, &expected_dir, config) else {
+        return failure;
+    };
+
+    let mut changes = vec![ModelChange::MoveModelFile {
+        model_id: model.__common_attr__.unique_id.clone(),
+        model_name: model.__common_attr__.name.clone(),
+        patch_path: Some(original_path.to_path_buf()),
+        new_path: new_sql_path.clone(),
+    }];
+
+    add_colocated_yaml_move(model, &original_path, &new_sql_path, &mut changes);
+    model.__common_attr__.original_file_path = new_sql_path;
+    Ok(Some(changes))
+}
+
+/// Appends a `MovePropertiesFile` change if the model's YAML is co-located with its SQL file,
+/// and updates the working model's patch_path to the new location.
+fn add_colocated_yaml_move(
+    model: &mut ManifestModel,
+    original_sql_path: &Path,
+    new_sql_path: &Path,
+    changes: &mut Vec<ModelChange>,
+) {
+    let Some(patch_path) = model.__common_attr__.patch_path.clone() else {
+        return;
+    };
+    if patch_path.parent() != original_sql_path.parent() {
+        return;
+    }
+    let Some(new_yaml_path) = new_sql_path
+        .parent()
+        .and_then(|d| patch_path.file_name().map(|f| d.join(f)))
+    else {
+        return;
+    };
+    model.__common_attr__.patch_path = Some(new_yaml_path.clone());
+    changes.push(ModelChange::MovePropertiesFile {
+        model_id: model.__common_attr__.unique_id.clone(),
+        model_name: model.__common_attr__.name.clone(),
+        patch_path: Some(patch_path),
+        new_path: new_yaml_path,
+    });
+}
+
+/// Returns the name of the nearest ancestor directory that matches any configured directory name,
+/// walking upward from the file's parent.
+fn nearest_recognized_dir(path: &Path, config: &Config) -> Option<String> {
+    let recognized = [
+        config.staging_directory.as_str(),
+        config.intermediate_directory.as_str(),
+        config.mart_directory.as_str(),
+    ];
+    let mut current = path.parent()?;
+    loop {
+        if let Some(name) = current.file_name().and_then(|n| n.to_str()) {
+            if recognized.contains(&name) {
+                return Some(name.to_string());
+            }
+        }
+        match current.parent() {
+            Some(p) => current = p,
+            None => return None,
+        }
+    }
+}
+
+/// Computes where a model should be placed so that its nearest recognized
+/// ancestor directory equals `expected_dir`.
+///
+/// - If `expected_dir` already appears higher in the path, the model is placed directly under it.
+/// - Otherwise it is placed as a sibling of the nearest wrong recognized dir:
+///   `<nearest_wrong_recognized_dir.parent()>/<expected_dir>/`.
+fn compute_fix_path(path: &Path, expected_dir: &str, config: &Config) -> Option<PathBuf> {
+    let recognized = [
+        config.staging_directory.as_str(),
+        config.intermediate_directory.as_str(),
+        config.mart_directory.as_str(),
+    ];
+    let filename = path.file_name()?;
+    let mut first_wrong: Option<PathBuf> = None;
+    let mut current = path.parent()?;
+    loop {
+        if let Some(name) = current.file_name().and_then(|n| n.to_str()) {
+            if name == expected_dir {
+                return Some(current.join(filename));
+            }
+            if recognized.contains(&name) && first_wrong.is_none() {
+                first_wrong = Some(current.to_path_buf());
+            }
+        }
+        match current.parent() {
+            Some(p) => current = p,
+            None => break,
+        }
+    }
+    first_wrong.and_then(|dir| dir.parent().map(|p| p.join(expected_dir).join(filename)))
+}
+
 // helper functions
 fn is_public_model(model: &ManifestModel) -> bool {
     model.config.access == Some(dbt_schemas::schemas::common::Access::Public)
@@ -1203,5 +1349,172 @@ mod tests {
             ..Default::default()
         };
         assert!(dead_model(model, &manifest, &config).is_err());
+    }
+
+    // --- check_model_directories tests ---
+
+    fn directories_config() -> Config {
+        Config {
+            select: vec![Selector::ModelDirectories],
+            fix: false,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn staging_model_in_correct_directory_passes() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.original_file_path =
+            PathBuf::from("models/staging/stripe/stg_orders.sql");
+        let config = directories_config();
+        assert!(
+            check_model_directories(&mut model, &config)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn staging_model_nested_passes() {
+        // Nested subdirectory under staging is fine — nearest recognized dir is still "staging".
+        let mut model = ManifestModel::default();
+        model.__common_attr__.original_file_path =
+            PathBuf::from("models/staging/stripe/base/stg_orders.sql");
+        let config = directories_config();
+        assert!(
+            check_model_directories(&mut model, &config)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn staging_model_in_correct_dir_no_source_deps_passes() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.original_file_path = PathBuf::from("models/staging/stg_orders.sql");
+        let config = directories_config();
+        assert!(
+            check_model_directories(&mut model, &config)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn staging_model_in_wrong_dir_fails() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.test.stg_customers".to_string();
+        model.__common_attr__.name = "stg_customers".to_string();
+        model.__common_attr__.original_file_path = PathBuf::from("models/marts/stg_customers.sql");
+        let config = directories_config();
+        assert!(matches!(
+            check_model_directories(&mut model, &config),
+            Err(ModelFailure::WrongModelDirectory { .. })
+        ));
+    }
+
+    #[test]
+    fn non_staging_model_in_correct_directory_passes() {
+        let mut model = ManifestModel::default();
+        model.__common_attr__.original_file_path =
+            PathBuf::from("models/intermediate/int_orders.sql");
+        let config = directories_config();
+        assert!(
+            check_model_directories(&mut model, &config)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn dim_model_nested_under_intermediate_fails_and_fixes() {
+        // dim_model_7 in models/marts/intermediate/ -> should be in models/marts/
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.test.dim_model_7".to_string();
+        model.__common_attr__.name = "dim_model_7".to_string();
+        model.__common_attr__.original_file_path =
+            PathBuf::from("models/marts/intermediate/dim_model_7.sql");
+        let mut config = Config {
+            fix: false,
+            fixable: vec![Selector::ModelDirectories],
+            ..directories_config()
+        };
+
+        // Fails without fix
+        assert!(matches!(
+            check_model_directories(&mut model, &config),
+            Err(ModelFailure::WrongModelDirectory { .. })
+        ));
+
+        // Fix moves it directly under marts/
+        config.fix = true;
+        let changes = check_model_directories(&mut model, &config)
+            .unwrap()
+            .expect("should produce changes");
+        assert!(
+            changes
+                .iter()
+                .any(|c| matches!(c, ModelChange::MoveModelFile { new_path, .. }
+            if new_path == &PathBuf::from("models/marts/dim_model_7.sql")))
+        );
+        assert_eq!(
+            model.__common_attr__.original_file_path,
+            PathBuf::from("models/marts/dim_model_7.sql")
+        );
+    }
+
+    #[test]
+    fn int_model_directly_in_marts_fails_and_fixes() {
+        // int_model_4 in models/marts/ -> fix as sibling: models/intermediate/
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.test.int_model_4".to_string();
+        model.__common_attr__.name = "int_model_4".to_string();
+        model.__common_attr__.original_file_path = PathBuf::from("models/marts/int_model_4.sql");
+        let config = Config {
+            fix: true,
+            fixable: vec![Selector::ModelDirectories],
+            ..directories_config()
+        };
+        let changes = check_model_directories(&mut model, &config)
+            .unwrap()
+            .expect("should produce changes");
+        assert!(
+            changes
+                .iter()
+                .any(|c| matches!(c, ModelChange::MoveModelFile { new_path, .. }
+            if new_path == &PathBuf::from("models/intermediate/int_model_4.sql")))
+        );
+        assert_eq!(
+            model.__common_attr__.original_file_path,
+            PathBuf::from("models/intermediate/int_model_4.sql")
+        );
+    }
+
+    #[test]
+    fn colocated_yaml_also_moved() {
+        // dim model in wrong directory — YAML should move alongside the SQL
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.test.dim_orders".to_string();
+        model.__common_attr__.name = "dim_orders".to_string();
+        model.__common_attr__.original_file_path =
+            PathBuf::from("models/intermediate/dim_orders.sql");
+        model.__common_attr__.patch_path =
+            Some(PathBuf::from("models/intermediate/dim_orders.yml"));
+        let config = Config {
+            fix: true,
+            fixable: vec![Selector::ModelDirectories],
+            ..directories_config()
+        };
+        let changes = check_model_directories(&mut model, &config)
+            .unwrap()
+            .expect("should produce changes");
+        assert!(changes.iter().any(
+            |c| matches!(c, ModelChange::MovePropertiesFile { new_path, .. }
+            if new_path == &PathBuf::from("models/marts/dim_orders.yml"))
+        ));
+        assert_eq!(
+            model.__common_attr__.patch_path,
+            Some(PathBuf::from("models/marts/dim_orders.yml"))
+        );
     }
 }

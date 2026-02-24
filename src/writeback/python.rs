@@ -166,11 +166,35 @@ pub fn apply_with_python(
                             property_payload = Some(prop);
                         }
                     }
-                    other => {
-                        return Err(WriteBackError::UnsupportedModelChange {
-                            model_id: model_changes.model_id.clone(),
-                            change: format!("{other:?}"),
-                        });
+                    // doesn't actually require python help, so we can just do it in Rust and not include in batch updates
+                    ModelChange::MoveModelFile {
+                        patch_path,
+                        new_path,
+                        ..
+                    } => {
+                        let patch =
+                            patch_path
+                                .clone()
+                                .ok_or_else(|| WriteBackError::PatchPathMissing {
+                                    model_id: model_changes.model_id.clone(),
+                                })?;
+                        let src = if patch.is_absolute() {
+                            patch
+                        } else {
+                            project_root.join(patch)
+                        };
+                        let dst = if new_path.is_absolute() {
+                            new_path.clone()
+                        } else {
+                            project_root.join(new_path)
+                        };
+                        if let Some(parent) = dst.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::rename(&src, &dst)?;
+                    }
+                    ModelChange::GeneratePropertiesFile { .. } => {
+                        // The check phase already wrote the properties file; nothing to do.
                     }
                 }
             }
