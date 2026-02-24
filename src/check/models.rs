@@ -850,7 +850,11 @@ fn compute_fix_path(path: &Path, expected_dir: &str, config: &Config) -> Option<
             None => break,
         }
     }
-    first_wrong.and_then(|dir| dir.parent().map(|p| p.join(expected_dir).join(filename)))
+    let first_wrong = first_wrong?;
+    let relative = path.strip_prefix(&first_wrong).ok()?;
+    first_wrong
+        .parent()
+        .map(|p| p.join(expected_dir).join(relative))
 }
 
 // helper functions
@@ -1397,6 +1401,35 @@ mod tests {
             check_model_directories(&mut model, &config)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn staging_model_in_wrong_dir_with_subdir_fixes_to_staging_sibling() {
+        // stg_whatever in models/marts/stripe/ should move to models/staging/stripe/,
+        // preserving the stripe/ subdirectory.
+        let mut model = ManifestModel::default();
+        model.__common_attr__.unique_id = "model.test.stg_whatever".to_string();
+        model.__common_attr__.name = "stg_whatever".to_string();
+        model.__common_attr__.original_file_path =
+            PathBuf::from("models/marts/stripe/stg_whatever.sql");
+        let config = Config {
+            fix: true,
+            fixable: vec![Selector::ModelDirectories],
+            ..directories_config()
+        };
+        let changes = check_model_directories(&mut model, &config)
+            .unwrap()
+            .expect("should produce changes");
+        assert!(
+            changes
+                .iter()
+                .any(|c| matches!(c, ModelChange::MoveModelFile { new_path, .. }
+            if new_path == &PathBuf::from("models/staging/stripe/stg_whatever.sql")))
+        );
+        assert_eq!(
+            model.__common_attr__.original_file_path,
+            PathBuf::from("models/staging/stripe/stg_whatever.sql")
         );
     }
 
