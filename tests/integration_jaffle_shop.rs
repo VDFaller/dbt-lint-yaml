@@ -142,6 +142,37 @@ fn test_model_properties_layout_rebase() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Verifies that a staging model placed outside the staging directory is flagged.
+///
+/// Moves `stg_customers.sql` and its YAML from `models/staging/` to `models/marts/` and
+/// confirms the linter exits non-zero with `model_directories` enabled.
+#[test]
+#[ignore = "needs a profiles.yml for full project load"]
+fn test_model_directories_flags_stg_model_in_marts() -> Result<(), Box<dyn Error>> {
+    let toml_override = r#"
+select = ["model_directories"]
+"#;
+    let temp = setup_jaffle_shop_fixture(Some(toml_override))?;
+    let base = temp.path().join("tests/jaffle_shop/models");
+
+    fs::rename(
+        base.join("staging/stg_customers.sql"),
+        base.join("marts/stg_customers.sql"),
+    )?;
+    fs::rename(
+        base.join("staging/stg_customers.yml"),
+        base.join("marts/stg_customers.yml"),
+    )?;
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
+    cmd.arg("parse")
+        .arg("--project-dir")
+        .arg(temp.path().join("tests/jaffle_shop"));
+    cmd.assert().failure();
+
+    Ok(())
+}
+
 // Verifies that passing `parse` explicitly produces the same exit code as omitting it.
 // The shim strips the legacy `parse` positional arg before forwarding to dbt-fusion.
 #[test]
