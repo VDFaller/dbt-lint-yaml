@@ -142,6 +142,33 @@ fn test_model_properties_layout_rebase() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+// Verifies that passing `parse` explicitly produces the same exit code as omitting it.
+// The shim strips the legacy `parse` positional arg before forwarding to dbt-fusion.
+#[test]
+#[ignore = "needs a profiles.yml for full project load"]
+fn test_explicit_parse_arg_compat() -> Result<(), Box<dyn Error>> {
+    let temp = setup_jaffle_shop_fixture(None)?;
+    let project_dir = temp.path().join("tests/jaffle_shop");
+
+    let mut without_parse = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
+    without_parse.arg("--project-dir").arg(&project_dir);
+
+    let mut with_parse = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
+    with_parse
+        .arg("parse")
+        .arg("--project-dir")
+        .arg(&project_dir);
+
+    let code_without = without_parse.output()?.status.code();
+    let code_with = with_parse.output()?.status.code();
+
+    assert_eq!(
+        code_without, code_with,
+        "exit code should be the same whether 'parse' is passed explicitly or omitted"
+    );
+    Ok(())
+}
+
 // This test verifies that when a properties file is missing,
 // we're able to get upstream column descriptions through osmosis
 #[test]
