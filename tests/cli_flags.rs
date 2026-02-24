@@ -1,5 +1,5 @@
-/// Tests for the CLI meta-flags handled by `maybe_handle_meta_flags`.
-/// These do not require a dbt project and are never marked `#[ignore]`.
+//! Tests for the CLI meta-flags handled by `maybe_handle_meta_flags`.
+//! These do not require a dbt project and are never marked `#[ignore]`.
 
 fn bin() -> assert_cmd::Command {
     assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"))
