@@ -14,6 +14,7 @@ use sources::check_sources;
 
 pub use crate::change_descriptors::ColumnChange;
 pub use crate::change_descriptors::{ModelChange, ModelChanges};
+pub use crate::change_descriptors::{SourceChange, SourceChanges};
 pub use columns::{ColumnFailure, ColumnResult};
 pub use exposures::{ExposureChange, ExposureFailure, ExposureResult};
 pub use models::{ModelFailure, ModelResult};
@@ -25,6 +26,7 @@ pub struct CheckResult {
     pub sources: BTreeMap<String, SourceResult>,
     pub exposures: BTreeMap<String, ExposureResult>,
     pub model_changes: BTreeMap<String, ModelChanges>,
+    pub source_changes: BTreeMap<String, SourceChanges>,
 }
 
 impl CheckResult {
@@ -87,6 +89,11 @@ where
     }
 
     for source_result in check_sources(manifest, config) {
+        if let Some(changes) = source_result.changes() {
+            result
+                .source_changes
+                .insert(changes.source_id.clone(), changes.clone());
+        }
         reporter(CheckEvent::Source(&source_result));
         let source_key = source_result.source_id().to_string();
         result.sources.insert(source_key, source_result);

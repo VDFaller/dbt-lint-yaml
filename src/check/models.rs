@@ -809,10 +809,10 @@ fn nearest_recognized_dir(path: &Path, config: &Config) -> Option<String> {
     ];
     let mut current = path.parent()?;
     loop {
-        if let Some(name) = current.file_name().and_then(|n| n.to_str()) {
-            if recognized.contains(&name) {
-                return Some(name.to_string());
-            }
+        if let Some(name) = current.file_name().and_then(|n| n.to_str())
+            && recognized.contains(&name)
+        {
+            return Some(name.to_string());
         }
         match current.parent() {
             Some(p) => current = p,
