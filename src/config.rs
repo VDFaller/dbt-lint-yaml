@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use strsim::levenshtein;
 use struct_field_names_as_array::FieldNamesAsSlice;
 use strum::{AsRefStr, EnumIter, EnumProperty, IntoEnumIterator};
@@ -59,6 +59,10 @@ pub enum Selector {
     ExposureDependentOnPrivateModel,
     #[strum(props(default = false))]
     ExposureParentsMaterializations,
+    #[strum(props(default = false, fixable = true))]
+    ModelDirectories,
+    #[strum(props(default = false, fixable = true))]
+    SourceDirectories,
 }
 
 #[derive(Debug, Error)]
@@ -207,6 +211,18 @@ pub struct Config {
     pub writeback: WritebackMethod,
     #[serde(default = "default_model_properties_layout")]
     pub model_properties_layout: ModelPropertiesLayout,
+    #[serde(default = "default_staging_directory")]
+    pub staging_directory: String,
+    #[serde(default = "default_staging_prefixes")]
+    pub staging_prefixes: Vec<String>,
+    #[serde(default = "default_intermediate_directory")]
+    pub intermediate_directory: String,
+    #[serde(default = "default_intermediate_prefixes")]
+    pub intermediate_prefixes: Vec<String>,
+    #[serde(default = "default_mart_directory")]
+    pub mart_directory: String,
+    #[serde(default = "default_mart_prefixes")]
+    pub mart_prefixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -246,6 +262,12 @@ impl Default for Config {
             render_descriptions: false,
             writeback: default_writeback(),
             model_properties_layout: default_model_properties_layout(),
+            staging_directory: default_staging_directory(),
+            staging_prefixes: default_staging_prefixes(),
+            intermediate_directory: default_intermediate_directory(),
+            intermediate_prefixes: default_intermediate_prefixes(),
+            mart_directory: default_mart_directory(),
+            mart_prefixes: default_mart_prefixes(),
         }
     }
 }
@@ -295,6 +317,98 @@ fn default_fixable() -> Vec<Selector> {
 
 fn default_invalid_descriptions() -> Vec<String> {
     vec!["TBD".to_string(), "FILL ME OUT".to_string()]
+}
+
+fn default_staging_directory() -> String {
+    "staging".to_string()
+}
+
+fn default_staging_prefixes() -> Vec<String> {
+    vec!["stg_".to_string(), "base_".to_string()]
+}
+
+fn default_intermediate_directory() -> String {
+    "intermediate".to_string()
+}
+
+fn default_intermediate_prefixes() -> Vec<String> {
+    vec!["int_".to_string()]
+}
+
+fn default_mart_directory() -> String {
+    "mart".to_string()
+}
+
+fn default_mart_prefixes() -> Vec<String> {
+    vec!["dim_".to_string(), "fct_".to_string()]
+}
+
+/// Classification of a model based on its name prefix and the configured directory maps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelType {
+    Staging {
+        expected_dir: String,
+    },
+    Intermediate {
+        expected_dir: String,
+    },
+    Mart {
+        expected_dir: String,
+    },
+    /// No configured prefix matched — the directory check is skipped for this model.
+    Unknown,
+}
+
+impl ModelType {
+    /// Classify a model by extracting its name from the file stem and doing a
+    /// longest-prefix-match across all three configured prefix lists.
+    pub fn from_file_path(path: &Path, config: &Config) -> Self {
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+            return ModelType::Unknown;
+        };
+
+        let best = [
+            longest_prefix(name, &config.staging_prefixes).map(|len| {
+                (
+                    len,
+                    ModelType::Staging {
+                        expected_dir: config.staging_directory.clone(),
+                    },
+                )
+            }),
+            longest_prefix(name, &config.intermediate_prefixes).map(|len| {
+                (
+                    len,
+                    ModelType::Intermediate {
+                        expected_dir: config.intermediate_directory.clone(),
+                    },
+                )
+            }),
+            longest_prefix(name, &config.mart_prefixes).map(|len| {
+                (
+                    len,
+                    ModelType::Mart {
+                        expected_dir: config.mart_directory.clone(),
+                    },
+                )
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by_key(|(len, _)| *len);
+
+        best.map(|(_, model_type)| model_type)
+            .unwrap_or(ModelType::Unknown)
+    }
+}
+
+/// Returns the length of the longest prefix in `prefixes` that `name` starts with, if any.
+fn longest_prefix(name: &str, prefixes: &[String]) -> Option<usize> {
+    prefixes
+        .iter()
+        .filter(|prefix| name.starts_with(prefix.as_str()))
+        .map(|prefix| prefix.len())
+        .max()
 }
 
 fn validate_keys(table: &toml::value::Table) -> Result<(), ConfigError> {
@@ -479,6 +593,81 @@ mod tests {
                 Selector::MissingColumnDescriptions,
                 Selector::MissingModelDescriptions
             ]
+        );
+    }
+
+    #[test]
+    fn model_type_staging_prefix() {
+        let config = Config::default();
+        assert_eq!(
+            ModelType::from_file_path(Path::new("models/staging/stg_orders.sql"), &config),
+            ModelType::Staging {
+                expected_dir: "staging".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn model_type_base_prefix_is_staging() {
+        let config = Config::default();
+        assert_eq!(
+            ModelType::from_file_path(Path::new("models/staging/base_orders.sql"), &config),
+            ModelType::Staging {
+                expected_dir: "staging".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn model_type_intermediate_prefix() {
+        let config = Config::default();
+        assert_eq!(
+            ModelType::from_file_path(Path::new("models/intermediate/int_orders.sql"), &config),
+            ModelType::Intermediate {
+                expected_dir: "intermediate".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn model_type_mart_prefix() {
+        let config = Config::default();
+        assert_eq!(
+            ModelType::from_file_path(Path::new("models/mart/dim_customers.sql"), &config),
+            ModelType::Mart {
+                expected_dir: "mart".to_string()
+            }
+        );
+        assert_eq!(
+            ModelType::from_file_path(Path::new("models/mart/fct_orders.sql"), &config),
+            ModelType::Mart {
+                expected_dir: "mart".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn model_type_unknown_prefix() {
+        let config = Config::default();
+        assert_eq!(
+            ModelType::from_file_path(Path::new("models/other/my_model.sql"), &config),
+            ModelType::Unknown
+        );
+    }
+
+    #[test]
+    fn model_type_longest_prefix_wins() {
+        let mut config = Config::default();
+        // stg_stripe_ is longer than stg_ and maps to a different directory
+        config.staging_prefixes.push("stg_stripe_".to_string());
+        config.mart_prefixes.push("stg_stripe_".to_string()); // conflicting longer match in mart
+
+        // stg_stripe_ in mart_prefixes is longer than stg_ in staging_prefixes
+        assert_eq!(
+            ModelType::from_file_path(Path::new("models/mart/stg_stripe_orders.sql"), &config),
+            ModelType::Mart {
+                expected_dir: "mart".to_string()
+            }
         );
     }
 }

@@ -185,8 +185,6 @@ pub(crate) fn check_model(
         .next()
         .unwrap_or(&model_unique_id)
         .to_string();
-    let _model_type = model_type(original_model); // currently unused
-
     let mut failures: Vec<ModelFailure> = Vec::new();
     let mut model_level_changes: Vec<ModelChange> = Vec::new();
     let mut property_change_required = false;
@@ -712,21 +710,6 @@ fn missing_required_tests(
 // helper functions
 fn is_public_model(model: &ManifestModel) -> bool {
     model.config.access == Some(dbt_schemas::schemas::common::Access::Public)
-}
-
-fn model_type(model: &ManifestModel) -> &str {
-    // crude heuristic based on file path
-    // TODO: make this configurable or at least more robust
-    let ofp = &model.__common_attr__.original_file_path;
-    if ofp.starts_with("models/staging/") {
-        "staging"
-    } else if ofp.starts_with("models/marts/") {
-        "mart"
-    } else if ofp.starts_with("models/intermediate/") {
-        "intermediate"
-    } else {
-        "other"
-    }
 }
 
 /// A model is considered dead if it has no downstream dependencies.
