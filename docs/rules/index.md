@@ -28,3 +28,5 @@ This folder documents the user-facing rules you can enable or disable in `dbt-li
 - [exposure_dependent_on_private_model](exposure_dependent_on_private_model.md) — Exposure depends on private models
 - [exposure_parents_materializations](exposure_parents_materializations.md) — Exposure depends on non-materialized parent models
 - [dead_model](dead_model.md) — Dead model (has no downstream dependencies)
+- [model_directories](model_directories.md) — Model is not in the expected tier directory
+- [source_directories](source_directories.md) — Source YAML is not in the expected subdirectory
