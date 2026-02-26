@@ -17,6 +17,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+sys.path.insert(0, str(Path(__file__).parent))
+
+from yaml_utils import YamlHelperError, init_yaml, load_request  # noqa: E402
+
 try:
     from ruamel.yaml import YAML
 except ImportError:  # pragma: no cover - import error should bubble up clearly
@@ -27,15 +31,12 @@ except ImportError:  # pragma: no cover - import error should bubble up clearly
     raise
 
 
-class PatchError(Exception):
+class PatchError(YamlHelperError):
     """Raised when the YAML structure does not match expectations."""
 
 
 def load_payload() -> Dict[str, Any]:
-    try:
-        return json.load(sys.stdin)
-    except json.JSONDecodeError as exc:  # pragma: no cover - input contract violation
-        raise PatchError(f"Invalid JSON payload: {exc}") from exc
+    return load_request()
 
 
 def ensure_sequence(value: Any, name: str) -> List[Any]:
@@ -133,9 +134,7 @@ def apply_updates(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     if not model_updates:
         return {}
 
-    yaml = YAML()
-    yaml.preserve_quotes = True
-    yaml.indent(mapping=2, sequence=4, offset=2)
+    yaml = init_yaml()
 
     if not patch_path.exists():
         raise PatchError(f"YAML file `{patch_path}` not found")

@@ -297,6 +297,7 @@ async fn main() -> FsResult<()> {
         match writeback::apply_source_changes(
             project.project_dir.as_path(),
             &check_result.source_changes,
+            &config,
         ) {
             Ok(applied) => {
                 for source_id in applied {
