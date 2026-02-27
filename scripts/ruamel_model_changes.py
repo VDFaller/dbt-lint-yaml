@@ -35,10 +35,6 @@ class PatchError(YamlHelperError):
     """Raised when the YAML structure does not match expectations."""
 
 
-def load_payload() -> Dict[str, Any]:
-    return load_request()
-
-
 def ensure_sequence(value: Any, name: str) -> List[Any]:
     if value is None:
         return []
@@ -162,7 +158,7 @@ def apply_updates(payload: Dict[str, Any]) -> Dict[str, List[str]]:
 
 def main() -> int:
     try:
-        payload = load_payload()
+        payload = load_request()
         results = apply_updates(payload)
     except PatchError as exc:
         print(str(exc), file=sys.stderr)

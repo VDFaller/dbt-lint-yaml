@@ -17,15 +17,8 @@ from yaml_utils import (  # noqa: E402
     write_or_remove,
 )
 
-try:
-    from ruamel.yaml import YAML
-    from ruamel.yaml.comments import CommentedMap, CommentedSeq
-except ImportError:  # pragma: no cover - surface dependency error clearly
-    print(
-        "ruamel.yaml is required to apply YAML updates. Install it with `pip install ruamel.yaml`.",
-        file=sys.stderr,
-    )
-    raise
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 
 def ensure_model_sequence(doc: CommentedMap) -> CommentedSeq:
