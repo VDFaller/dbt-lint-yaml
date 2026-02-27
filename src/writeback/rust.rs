@@ -285,6 +285,77 @@ fn property_file_is_empty(doc: &PropertyFile) -> bool {
         && doc.extras.is_empty()
 }
 
+// ── Source directory writeback (Rust path) ───────────────────────────────────
+
+use crate::writeback::properties::SourceProperty;
+
+/// Apply source directory moves using dbt_serde_yaml.
+///
+/// Extracts each named source block from the old YAML file and writes it to the
+/// correct destination, creating directories as needed. Deletes the old file
+/// when all sources have been moved out and no other content remains.
+pub fn apply_source_changes_with_rust(
+    by_old_path: &BTreeMap<PathBuf, BTreeMap<String, (PathBuf, Vec<String>)>>,
+) -> Result<Vec<String>, WriteBackError> {
+    let mut applied = Vec::new();
+
+    for (old_path, sources_to_move) in by_old_path {
+        if !old_path.exists() {
+            continue;
+        }
+
+        let contents = fs::read_to_string(old_path)?;
+        let mut old_doc: PropertyFile = dbt_serde_yaml::from_str(&contents)?;
+
+        for (source_name, (new_path, ids)) in sources_to_move {
+            let Some(source_prop) = extract_source_property(source_name, &mut old_doc) else {
+                continue;
+            };
+
+            let mut new_doc: PropertyFile = read_property_file(new_path)?;
+
+            let dest_sources = new_doc.sources.get_or_insert_with(Vec::new);
+            if let Some(existing) = dest_sources.iter_mut().find(|s| s.name == *source_name) {
+                existing.merge(&source_prop);
+            } else {
+                dest_sources.push(source_prop);
+            }
+
+            if let Some(parent) = new_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(new_path, dbt_serde_yaml::to_string(&new_doc)?)?;
+
+            applied.extend_from_slice(ids);
+        }
+
+        if source_file_is_empty(&old_doc) {
+            fs::remove_file(old_path)?;
+        } else {
+            fs::write(old_path, dbt_serde_yaml::to_string(&old_doc)?)?;
+        }
+    }
+
+    Ok(applied)
+}
+
+fn extract_source_property(source_name: &str, doc: &mut PropertyFile) -> Option<SourceProperty> {
+    let sources = doc.sources.as_mut()?;
+    let idx = sources.iter().position(|s| s.name == source_name)?;
+    let prop = sources.remove(idx);
+    if sources.is_empty() {
+        doc.sources = None;
+    }
+    Some(prop)
+}
+
+/// A source file is empty (safe to delete) when it has no sources and no models.
+/// Leftover top-level fields like `version: 2` are not meaningful on their own.
+fn source_file_is_empty(doc: &PropertyFile) -> bool {
+    doc.models.as_ref().is_none_or(|m| m.is_empty())
+        && doc.sources.as_ref().is_none_or(|s| s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +363,147 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use tempfile::tempdir;
+
+    // ── source writeback tests ────────────────────────────────────────────────
+
+    const MULTI_SOURCE_YAML: &str = r#"sources:
+  - name: ecom
+    description: E-commerce data
+    tables:
+      - name: raw_orders
+  - name: analytics
+    description: Analytics data
+    tables:
+      - name: metrics
+"#;
+
+    fn make_source_move_map(
+        moves: &[(&str, &str, &str)], // (source_name, old_path, new_path)
+    ) -> BTreeMap<PathBuf, BTreeMap<String, (PathBuf, Vec<String>)>> {
+        let mut by_old_path: BTreeMap<PathBuf, BTreeMap<String, (PathBuf, Vec<String>)>> =
+            BTreeMap::new();
+        for (source_name, old, new) in moves {
+            let source_id = format!("source.project.{source_name}.table");
+            by_old_path
+                .entry(PathBuf::from(old))
+                .or_default()
+                .entry(source_name.to_string())
+                .or_insert_with(|| (PathBuf::from(new), Vec::new()))
+                .1
+                .push(source_id);
+        }
+        by_old_path
+    }
+
+    #[test]
+    fn moves_one_source_leaves_other_in_place() {
+        let dir = tempdir().unwrap();
+        let old_file = dir.path().join("staging/__sources.yml");
+        fs::create_dir_all(old_file.parent().unwrap()).unwrap();
+        fs::write(&old_file, MULTI_SOURCE_YAML).unwrap();
+
+        let map = make_source_move_map(&[(
+            "ecom",
+            old_file.to_str().unwrap(),
+            dir.path()
+                .join("staging/ecom/_ecom__sources.yml")
+                .to_str()
+                .unwrap(),
+        )]);
+        let applied = apply_source_changes_with_rust(&map).unwrap();
+        assert_eq!(applied.len(), 1);
+
+        let new_file = dir.path().join("staging/ecom/_ecom__sources.yml");
+        assert!(new_file.exists());
+        let new_contents = fs::read_to_string(&new_file).unwrap();
+        assert!(new_contents.contains("ecom"));
+        assert!(!new_contents.contains("analytics"));
+
+        assert!(old_file.exists(), "old file should survive with analytics");
+        let old_contents = fs::read_to_string(&old_file).unwrap();
+        assert!(!old_contents.contains("ecom"));
+        assert!(old_contents.contains("analytics"));
+    }
+
+    #[test]
+    fn moves_all_sources_deletes_old_file() {
+        let dir = tempdir().unwrap();
+        let old_file = dir.path().join("staging/__sources.yml");
+        fs::create_dir_all(old_file.parent().unwrap()).unwrap();
+        fs::write(&old_file, MULTI_SOURCE_YAML).unwrap();
+
+        let old_str = old_file.to_str().unwrap();
+        let map = make_source_move_map(&[
+            (
+                "ecom",
+                old_str,
+                dir.path()
+                    .join("staging/ecom/_ecom__sources.yml")
+                    .to_str()
+                    .unwrap(),
+            ),
+            (
+                "analytics",
+                old_str,
+                dir.path()
+                    .join("staging/analytics/_analytics__sources.yml")
+                    .to_str()
+                    .unwrap(),
+            ),
+        ]);
+        let applied = apply_source_changes_with_rust(&map).unwrap();
+        assert_eq!(applied.len(), 2);
+
+        assert!(dir.path().join("staging/ecom/_ecom__sources.yml").exists());
+        assert!(
+            dir.path()
+                .join("staging/analytics/_analytics__sources.yml")
+                .exists()
+        );
+        assert!(!old_file.exists(), "old file should be deleted");
+    }
+
+    #[test]
+    fn deduplicates_multi_table_source_into_single_block() {
+        let yaml = r#"sources:
+  - name: ecom
+    tables:
+      - name: raw_orders
+      - name: raw_customers
+"#;
+        let dir = tempdir().unwrap();
+        let old_file = dir.path().join("staging/__sources.yml");
+        fs::create_dir_all(old_file.parent().unwrap()).unwrap();
+        fs::write(&old_file, yaml).unwrap();
+
+        let new_path = dir.path().join("staging/ecom/_ecom__sources.yml");
+        // Two source_ids for the same (old_path, source_name) — both collected
+        let mut by_old_path: BTreeMap<PathBuf, BTreeMap<String, (PathBuf, Vec<String>)>> =
+            BTreeMap::new();
+        by_old_path.entry(old_file.clone()).or_default().insert(
+            "ecom".to_string(),
+            (
+                new_path.clone(),
+                vec![
+                    "source.project.ecom.raw_orders".to_string(),
+                    "source.project.ecom.raw_customers".to_string(),
+                ],
+            ),
+        );
+
+        let applied = apply_source_changes_with_rust(&by_old_path).unwrap();
+        assert_eq!(applied.len(), 2, "both source_ids should be reported");
+
+        let new_contents = fs::read_to_string(&new_path).unwrap();
+        assert_eq!(
+            new_contents.matches("name: ecom").count(),
+            1,
+            "source block should not be duplicated"
+        );
+        assert!(!old_file.exists(), "old file should be deleted");
+    }
+
+    // ── model writeback tests ─────────────────────────────────────────────────
 
     fn sample_yaml() -> &'static str {
         r#"

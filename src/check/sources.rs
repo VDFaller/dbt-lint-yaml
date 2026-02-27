@@ -15,12 +15,19 @@ pub enum SourceFailure {
     MissingSourceDescription,
     SourceTableColumnDescriptions,
     SourceFanout,
+    WrongSourceDirectory { expected: String, actual: String },
 }
 impl Display for SourceFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SourceFailure::DuplicateDefinition(duplicate_id) => {
                 write!(f, "DuplicateDefinition:{duplicate_id}")
+            }
+            SourceFailure::WrongSourceDirectory { expected, actual } => {
+                write!(
+                    f,
+                    "WrongSourceDirectory (expected: {expected}, actual: {actual})"
+                )
             }
             _ => f.write_str(self.as_ref()),
         }
@@ -97,6 +104,12 @@ fn check_source(
     let mut source_level_changes: Vec<SourceChange> = Vec::new();
     let mut property_change_required = false;
 
+    match check_source_directories(&mut working_source, config) {
+        Ok(Some(change)) => source_level_changes.push(change),
+        Ok(None) => {}
+        Err(failure) => failures.push(failure),
+    }
+
     match missing_source_table_description(&mut working_source, config) {
         Ok(Some(change)) => {
             property_change_required = true;
@@ -154,6 +167,7 @@ fn check_source(
                         *slot = Some(property.clone());
                         applied = true;
                     }
+                    SourceChange::MoveSourceToFile { .. } => {}
                 }
             }
         }
@@ -186,6 +200,79 @@ fn check_source(
         failures,
         changes,
     }
+}
+
+/// Validates that a source YAML definition lives under `<staging_directory>/<source_name>/`.
+///
+/// Walks upward from the source's patch_path to find `staging_directory`, then checks
+/// that the immediate subdirectory under it matches the source name.
+fn check_source_directories(
+    source: &mut ManifestSource,
+    config: &Config,
+) -> Result<Option<SourceChange>, SourceFailure> {
+    if !config.is_selected(Selector::SourceDirectories) {
+        return Ok(None);
+    }
+
+    let Some(patch_path) = &source.__common_attr__.patch_path.clone() else {
+        return Ok(None);
+    };
+
+    let staging_dir_name = config.staging_directory.as_str();
+    let source_name = source.source_name.as_str();
+
+    // Walk upward from the YAML file to find the staging directory, tracking
+    // the last directory seen (which becomes the "child of staging" once found).
+    let Some(parent) = patch_path.parent() else {
+        return Ok(None);
+    };
+
+    let mut current = parent;
+    let mut prev: Option<&std::path::Path> = None;
+
+    let staging_path = loop {
+        if current.file_name().and_then(|n| n.to_str()) == Some(staging_dir_name) {
+            break current;
+        }
+        match current.parent() {
+            Some(p) => {
+                prev = Some(current);
+                current = p;
+            }
+            None => return Ok(None), // staging_directory not found — skip
+        }
+    };
+
+    // `prev` is the immediate subdirectory of staging that contains this file (if any).
+    let child_dir_name = prev.and_then(|p| p.file_name()).and_then(|n| n.to_str());
+
+    if child_dir_name == Some(source_name) {
+        return Ok(None); // already in the correct place
+    }
+
+    let actual = child_dir_name.unwrap_or(staging_dir_name).to_string();
+
+    let failure = Err(SourceFailure::WrongSourceDirectory {
+        expected: source_name.to_string(),
+        actual,
+    });
+
+    if !config.is_fixable(Selector::SourceDirectories) {
+        return failure;
+    }
+
+    let new_patch_path = staging_path
+        .join(source_name)
+        .join(format!("_{}__sources.yml", source_name));
+
+    source.__common_attr__.patch_path = Some(new_patch_path.clone());
+
+    Ok(Some(SourceChange::MoveSourceToFile {
+        source_id: source.__common_attr__.unique_id.clone(),
+        source_name: source_name.to_string(),
+        old_patch_path: patch_path.clone(),
+        new_patch_path,
+    }))
 }
 
 /// Check if a source table is missing a description.
@@ -369,10 +456,12 @@ fn missing_source_freshness(source: &ManifestSource, config: &Config) -> Result<
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
     use std::vec;
 
     use super::*;
-    use crate::config::Config;
+    use crate::change_descriptors::SourceChange;
+    use crate::config::{Config, Selector};
     use dbt_schemas::schemas::common::{FreshnessDefinition, FreshnessPeriod, FreshnessRules};
     use dbt_schemas::schemas::dbt_column::DbtColumn;
     use dbt_schemas::schemas::manifest::ManifestSource;
@@ -558,5 +647,155 @@ mod tests {
 
         let config = Config::default();
         assert!(missing_source_column_descriptions(&mut source, &config).is_ok());
+    }
+
+    // --- check_source_directories tests ---
+
+    fn directories_config() -> Config {
+        Config {
+            select: vec![Selector::SourceDirectories],
+            fix: false,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn source_in_correct_directory_passes() {
+        let mut source = ManifestSource {
+            source_name: "stripe".to_string(),
+            ..Default::default()
+        };
+        source.__common_attr__.patch_path =
+            Some(PathBuf::from("models/staging/stripe/_stripe__sources.yml"));
+        let config = directories_config();
+        assert!(
+            check_source_directories(&mut source, &config)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn source_in_wrong_sibling_directory_fails() {
+        let mut source = ManifestSource {
+            source_name: "stripe".to_string(),
+            ..Default::default()
+        };
+        source.__common_attr__.patch_path =
+            Some(PathBuf::from("models/staging/other/_other__sources.yml"));
+        let config = directories_config();
+        assert!(matches!(
+            check_source_directories(&mut source, &config),
+            Err(SourceFailure::WrongSourceDirectory { .. })
+        ));
+    }
+
+    #[test]
+    fn source_directly_in_staging_fails() {
+        let mut source = ManifestSource {
+            source_name: "stripe".to_string(),
+            ..Default::default()
+        };
+        source.__common_attr__.patch_path =
+            Some(PathBuf::from("models/staging/_stripe__sources.yml"));
+        let config = directories_config();
+        assert!(matches!(
+            check_source_directories(&mut source, &config),
+            Err(SourceFailure::WrongSourceDirectory { .. })
+        ));
+    }
+
+    #[test]
+    fn source_not_under_staging_is_skipped() {
+        let mut source = ManifestSource {
+            source_name: "stripe".to_string(),
+            ..Default::default()
+        };
+        source.__common_attr__.patch_path =
+            Some(PathBuf::from("models/marts/stripe/_stripe__sources.yml"));
+        let config = directories_config();
+        // No staging directory in the path — skip (Ok(None))
+        assert!(
+            check_source_directories(&mut source, &config)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn source_in_wrong_directory_fixes_to_correct_path() {
+        let mut source = ManifestSource {
+            source_name: "stripe".to_string(),
+            ..Default::default()
+        };
+        source.__common_attr__.unique_id = "source.project.stripe".to_string();
+        source.__common_attr__.patch_path =
+            Some(PathBuf::from("models/staging/other/_other__sources.yml"));
+
+        let config = Config {
+            fix: true,
+            fixable: vec![Selector::SourceDirectories],
+            ..directories_config()
+        };
+
+        let change = check_source_directories(&mut source, &config)
+            .unwrap()
+            .expect("should produce a change");
+
+        if let SourceChange::MoveSourceToFile {
+            old_patch_path,
+            new_patch_path,
+            source_name,
+            ..
+        } = change
+        {
+            assert_eq!(
+                old_patch_path,
+                PathBuf::from("models/staging/other/_other__sources.yml")
+            );
+            assert_eq!(
+                new_patch_path,
+                PathBuf::from("models/staging/stripe/_stripe__sources.yml")
+            );
+            assert_eq!(source_name, "stripe");
+        } else {
+            panic!("expected MoveSourceToFile change");
+        }
+
+        // patch_path on the working source should be updated
+        assert_eq!(
+            source.__common_attr__.patch_path,
+            Some(PathBuf::from("models/staging/stripe/_stripe__sources.yml"))
+        );
+    }
+
+    #[test]
+    fn source_directly_in_staging_fixes_to_correct_path() {
+        let mut source = ManifestSource {
+            source_name: "payments".to_string(),
+            ..Default::default()
+        };
+        source.__common_attr__.unique_id = "source.project.payments".to_string();
+        source.__common_attr__.patch_path =
+            Some(PathBuf::from("models/staging/_payments__sources.yml"));
+
+        let config = Config {
+            fix: true,
+            fixable: vec![Selector::SourceDirectories],
+            ..directories_config()
+        };
+
+        let change = check_source_directories(&mut source, &config)
+            .unwrap()
+            .expect("should produce a change");
+
+        if let SourceChange::MoveSourceToFile { new_patch_path, .. } = change {
+            assert_eq!(
+                new_patch_path,
+                PathBuf::from("models/staging/payments/_payments__sources.yml")
+            );
+        } else {
+            panic!("expected MoveSourceToFile change");
+        }
     }
 }

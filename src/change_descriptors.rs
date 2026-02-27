@@ -56,6 +56,12 @@ pub enum SourceChange {
         patch_path: Option<PathBuf>,
         property: Option<SourceProperty>,
     },
+    MoveSourceToFile {
+        source_id: String,
+        source_name: String,
+        old_patch_path: PathBuf,
+        new_patch_path: PathBuf,
+    },
 }
 
 #[derive(Default, Debug, Clone)]

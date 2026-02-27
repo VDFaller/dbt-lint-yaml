@@ -166,11 +166,35 @@ pub fn apply_with_python(
                             property_payload = Some(prop);
                         }
                     }
-                    other => {
-                        return Err(WriteBackError::UnsupportedModelChange {
-                            model_id: model_changes.model_id.clone(),
-                            change: format!("{other:?}"),
-                        });
+                    // doesn't actually require python help, so we can just do it in Rust and not include in batch updates
+                    ModelChange::MoveModelFile {
+                        patch_path,
+                        new_path,
+                        ..
+                    } => {
+                        let patch =
+                            patch_path
+                                .clone()
+                                .ok_or_else(|| WriteBackError::PatchPathMissing {
+                                    model_id: model_changes.model_id.clone(),
+                                })?;
+                        let src = if patch.is_absolute() {
+                            patch
+                        } else {
+                            project_root.join(patch)
+                        };
+                        let dst = if new_path.is_absolute() {
+                            new_path.clone()
+                        } else {
+                            project_root.join(new_path)
+                        };
+                        if let Some(parent) = dst.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::rename(&src, &dst)?;
+                    }
+                    ModelChange::GeneratePropertiesFile { .. } => {
+                        // The check phase already wrote the properties file; nothing to do.
                     }
                 }
             }
@@ -367,4 +391,117 @@ fn invoke_python_batch_helper(
 
 fn extract_model_name(unique_id: &str) -> &str {
     unique_id.rsplit('.').next().unwrap_or(unique_id)
+}
+
+// ── Source directory writeback (Python path) ─────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct SourceMoveRequest {
+    old_patch_path: String,
+    source_name: String,
+    new_patch_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SourceMoveResponse {
+    applied: bool,
+}
+
+/// Apply source directory moves using the ruamel.yaml helper so that YAML
+/// comments and formatting are preserved in both the source and destination files.
+///
+/// Invokes the Python helper once per unique `(old_path, source_name)` pair.
+pub fn apply_source_changes_with_python(
+    by_old_path: &std::collections::BTreeMap<
+        std::path::PathBuf,
+        std::collections::BTreeMap<String, (std::path::PathBuf, Vec<String>)>,
+    >,
+) -> Result<Vec<String>, WriteBackError> {
+    if by_old_path.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let helper_path = resolve_source_helper_path()?;
+    let mut applied = Vec::new();
+
+    for (old_path, sources) in by_old_path {
+        if !old_path.exists() {
+            continue;
+        }
+        for (source_name, (new_path, ids)) in sources {
+            let request = SourceMoveRequest {
+                old_patch_path: old_path.to_string_lossy().into_owned(),
+                source_name: source_name.clone(),
+                new_patch_path: new_path.to_string_lossy().into_owned(),
+            };
+            let response = invoke_source_helper(&helper_path, &request)?;
+            if response.applied {
+                applied.extend_from_slice(ids);
+            }
+        }
+    }
+
+    Ok(applied)
+}
+
+fn resolve_source_helper_path() -> Result<std::path::PathBuf, WriteBackError> {
+    if let Ok(path) = std::env::var("DBT_LINT_YAML_SOURCE_HELPER") {
+        let path = std::path::PathBuf::from(path);
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(WriteBackError::HelperMissing(path));
+    }
+
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(dir) = exe_path.parent()
+    {
+        candidates.push(dir.join("ruamel_source_changes.py"));
+        candidates.push(dir.join("scripts").join("ruamel_source_changes.py"));
+    }
+
+    let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts/ruamel_source_changes.py");
+    candidates.push(fallback.clone());
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(WriteBackError::HelperMissing(fallback))
+}
+
+fn invoke_source_helper(
+    helper_path: &Path,
+    request: &SourceMoveRequest,
+) -> Result<SourceMoveResponse, WriteBackError> {
+    let mut command = Command::new("python3");
+    command.arg(helper_path);
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    let mut child = command.spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let json = serde_json::to_vec(request)?;
+        stdin.write_all(&json)?;
+    }
+
+    let output = child.wait_with_output()?;
+
+    if !output.status.success() {
+        let status = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WriteBackError::PythonFailure { status, stderr });
+    }
+
+    let response: SourceMoveResponse =
+        serde_json::from_slice(&output.stdout).map_err(WriteBackError::ResponseParseFailure)?;
+
+    Ok(response)
 }

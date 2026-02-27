@@ -293,6 +293,23 @@ async fn main() -> FsResult<()> {
         println!("Fixes available; re-run with --fix to apply them.");
     }
 
+    if config.fix && !check_result.source_changes.is_empty() {
+        match writeback::apply_source_changes(
+            project.project_dir.as_path(),
+            &check_result.source_changes,
+            &config,
+        ) {
+            Ok(applied) => {
+                for source_id in applied {
+                    println!("Moved source YAML for {source_id}");
+                }
+            }
+            Err(err) => {
+                eprintln!("Failed to apply source directory fixes: {err}");
+            }
+        }
+    }
+
     let has_failures = check_result.has_failures();
     print_summary(&check_result, &opts);
 

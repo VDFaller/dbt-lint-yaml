@@ -142,6 +142,81 @@ fn test_model_properties_layout_rebase() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Verifies that the `source_directories` check flags sources not in their expected
+/// subdirectory, and that `--fix` extracts each source block into a per-source YAML file.
+///
+/// The jaffle_shop fixture ships with `models/staging/__sources.yml` which contains both
+/// the `ecom` and `analytics` source blocks at the staging root — neither is in its own
+/// `<source_name>/` subdirectory.  After `--fix` each source should live in:
+///   `models/staging/ecom/_ecom__sources.yml`
+///   `models/staging/analytics/_analytics__sources.yml`
+/// and the original `__sources.yml` should be deleted.
+#[test]
+#[ignore = "needs a profiles.yml for full project load"]
+fn test_source_directories_fix_splits_sources() -> Result<(), Box<dyn Error>> {
+    let toml_override = r#"
+select = ["source_directories"]
+"#;
+    let temp = setup_jaffle_shop_fixture(Some(toml_override))?;
+    let staging = temp.path().join("tests/jaffle_shop/models/staging");
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
+    cmd.arg("parse")
+        .arg("--fix")
+        .arg("--project-dir")
+        .arg(temp.path().join("tests/jaffle_shop"));
+    cmd.assert().failure(); // failures are still reported even when fixes are applied
+
+    // Each source block should now have its own file under staging/<source_name>/
+    assert!(
+        staging.join("ecom/_ecom__sources.yml").exists(),
+        "ecom source file should be created"
+    );
+    assert!(
+        staging.join("analytics/_analytics__sources.yml").exists(),
+        "analytics source file should be created"
+    );
+
+    // Original shared file should be gone
+    assert!(
+        !staging.join("__sources.yml").exists(),
+        "original __sources.yml should be deleted after all sources are moved"
+    );
+
+    Ok(())
+}
+
+/// Verifies that a staging model placed outside the staging directory is flagged.
+///
+/// Moves `stg_customers.sql` and its YAML from `models/staging/` to `models/marts/` and
+/// confirms the linter exits non-zero with `model_directories` enabled.
+#[test]
+#[ignore = "needs a profiles.yml for full project load"]
+fn test_model_directories_flags_stg_model_in_marts() -> Result<(), Box<dyn Error>> {
+    let toml_override = r#"
+select = ["model_directories"]
+"#;
+    let temp = setup_jaffle_shop_fixture(Some(toml_override))?;
+    let base = temp.path().join("tests/jaffle_shop/models");
+
+    fs::rename(
+        base.join("staging/stg_customers.sql"),
+        base.join("marts/stg_customers.sql"),
+    )?;
+    fs::rename(
+        base.join("staging/stg_customers.yml"),
+        base.join("marts/stg_customers.yml"),
+    )?;
+
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!(env!("CARGO_PKG_NAME"));
+    cmd.arg("parse")
+        .arg("--project-dir")
+        .arg(temp.path().join("tests/jaffle_shop"));
+    cmd.assert().failure();
+
+    Ok(())
+}
+
 // Verifies that passing `parse` explicitly produces the same exit code as omitting it.
 // The shim strips the legacy `parse` positional arg before forwarding to dbt-fusion.
 #[test]
